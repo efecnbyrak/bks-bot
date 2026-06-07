@@ -1,0 +1,66 @@
+name: Sync Archives (One-Time)
+
+# Bu workflow sadece manuel olarak tetiklenir.
+# Her arşiv sezon için bir kez çalıştırılır, ardından disable edilir.
+# Sezon seçimi: 2025-2026 | 2024-2025 | 2023-2024 | 2022-2023 | 2021-2022
+#
+# SYNC_MODE=archive-full: md5 değişmemiş olsa bile tüm dosyaları işler.
+# İlk çalıştırmada archive-full kullan. Sonraki kontrollerda normal kullan.
+
+on:
+  workflow_dispatch:
+    inputs:
+      folder_key:
+        description: 'Arşiv klasör anahtarı'
+        required: true
+        type: choice
+        options:
+          - '2025-2026'
+          - '2024-2025'
+          - '2023-2024'
+          - '2022-2023'
+          - '2021-2022'
+      sync_mode:
+        description: 'Sync modu'
+        required: true
+        type: choice
+        default: 'archive-full'
+        options:
+          - 'archive-full'
+          - 'normal'
+
+jobs:
+  sync-archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Bağımlılıkları yükle
+        run: npm ci
+
+      - name: Prisma Client oluştur
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      - name: TypeScript derleme
+        run: npm run build
+
+      - name: Arşiv sync
+        run: node dist/index.js
+        env:
+          SYNC_FOLDER_KEY: ${{ github.event.inputs.folder_key }}
+          SYNC_MODE: ${{ github.event.inputs.sync_mode }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_DRIVE_RESOURCE_KEY: ${{ secrets.GOOGLE_DRIVE_RESOURCE_KEY }}
+          LOG_LEVEL: info

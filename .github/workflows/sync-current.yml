@@ -1,0 +1,42 @@
+name: Sync Current Season
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # Her 30 dakika (GitHub Actions ücretsiz limit içinde ~1.440 dk/ay)
+  workflow_dispatch:           # Manuel tetikleme
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Bağımlılıkları yükle
+        run: npm ci
+
+      - name: Prisma Client oluştur
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      - name: TypeScript derleme
+        run: npm run build
+
+      - name: Current season sync
+        run: node dist/index.js
+        env:
+          SYNC_FOLDER_KEY: current
+          SYNC_MODE: normal
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_DRIVE_RESOURCE_KEY: ${{ secrets.GOOGLE_DRIVE_RESOURCE_KEY }}
+          LOG_LEVEL: info

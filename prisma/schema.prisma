@@ -1,0 +1,626 @@
+// bks-bot Prisma schema — BKS ana uygulamasıyla aynı veritabanı
+// Worker bu şemayı yalnızca generate için kullanır.
+// Tüm modeller BKS prisma/schema.prisma ile senkronize tutulmalıdır.
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Kullanıcı modelleri (yalnızca READ — Worker yazmaz) ───────────────────
+
+model User {
+  id                   Int      @id @default(autoincrement())
+  username             String   @unique
+  password             String
+  roleId               Int
+  role                 Role     @relation(fields: [roleId], references: [id])
+  imageUrl             String?
+  referee              Referee?
+  official             GeneralOfficial?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  verificationCode     String?
+  verificationCodeExpiresAt DateTime?
+  isVerified           Boolean  @default(false)
+  isApproved           Boolean  @default(false)
+  suspendedUntil       DateTime?
+  isActive             Boolean  @default(true)
+  forceRefresh         Boolean  @default(false)
+  lastLoginAt          DateTime?
+  pendingEmail         String?
+  matchStore           Json?
+  resetPasswordCode    String?
+  resetPasswordExpiresAt DateTime?
+  recoveryCode         String?  @unique
+  videoProgress        VideoProgress[]
+  chats                ChatSession[]
+  securityQuestion     String?
+  securityAnswer       String?
+  mobileToken          String?  @unique
+  mobileTokenExpiry    DateTime?
+  passwordResetRequired Boolean @default(false)
+  auditLogs            AuditLog[]
+  announcements        Announcement[]
+  penalties            Penalty[]
+  sentMessages         UserMessage[] @relation("SentMessages")
+  receivedMessages     UserMessage[] @relation("ReceivedMessages")
+  observerReports      ObserverReport[]
+  createdAssignments   ExamAssignment[]
+  announcementReads    AnnouncementRead[]
+  userMatchAssignments UserMatchAssignment[]
+
+  @@index([id])
+  @@index([username])
+  @@index([roleId])
+  @@index([isActive])
+  @@index([isApproved])
+  @@index([isApproved, isActive])
+  @@map("users")
+}
+
+model Referee {
+  id             Int      @id @default(autoincrement())
+  user           User     @relation(fields: [userId], references: [id])
+  userId         Int      @unique
+  firstName      String
+  lastName       String
+  email          String   @unique
+  phone          String
+  address        String?
+  job            String?
+  classification String
+  imageUrl       String?
+  regions        Region[]
+  forms          AvailabilityForm[]
+  assignments    MatchAssignment[]
+  examAttempts   ExamAttempt[]
+  points         Int      @default(0)
+  rating         Int      @default(0)
+  iban           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@index([classification])
+  @@index([email])
+  @@map("referees")
+}
+
+model GeneralOfficial {
+  id             Int      @id @default(autoincrement())
+  user           User     @relation(fields: [userId], references: [id])
+  userId         Int      @unique
+  firstName      String
+  lastName       String
+  email          String   @unique
+  phone          String
+  address        String?
+  job            String?
+  officialType   String
+  imageUrl       String?
+  regions        Region[]
+  forms          AvailabilityForm[]
+  assignments    MatchAssignment[]
+  points         Int      @default(0)
+  rating         Int      @default(0)
+  examAttempts   ExamAttempt[]
+  iban           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@index([officialType])
+  @@index([email])
+  @@map("general_officials")
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  users User[]
+
+  @@map("roles")
+}
+
+model Region {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  referees Referee[]
+  officials GeneralOfficial[]
+
+  @@map("regions")
+}
+
+// ─── bks-bot worker tabloları (Worker YAZAR) ───────────────────────────────
+
+model DriveFile {
+  id               Int      @id @default(autoincrement())
+  driveFileId      String   @unique
+  driveFolderKey   String
+  fileName         String
+  mimeType         String
+  resourceKey      String?
+  md5Checksum      String?
+  modifiedTime     DateTime?
+  lastProcessedAt  DateTime?
+  lastProcessedMd5 String?
+  rowCount         Int      @default(0)
+  parseError       String?  @db.Text
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  parsedMatches    ParsedMatch[]
+
+  @@index([driveFolderKey])
+  @@index([isActive, driveFolderKey])
+  @@map("drive_files")
+}
+
+model ParsedMatch {
+  id              Int       @id @default(autoincrement())
+  matchKey        String    @unique
+  macAdi          String
+  tarih           String
+  tarihDate       DateTime?
+  saat            String?
+  salon           String?
+  kategori        String
+  hafta           Int?
+  sezon           String?
+  ligTuru         String
+  hakemler        String[]
+  masaGorevlileri String[]
+  saglikcilar     String[]
+  istatistikciler String[]
+  gozlemciler     String[]
+  sahaKomiserleri String[]
+  kaynakDosya     String
+  driveFileId     Int
+  driveFile       DriveFile @relation(fields: [driveFileId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  userAssignments UserMatchAssignment[]
+
+  @@index([tarihDate])
+  @@index([sezon])
+  @@index([driveFileId])
+  @@map("parsed_matches")
+}
+
+model UserMatchAssignment {
+  id                Int         @id @default(autoincrement())
+  userId            Int
+  matchId           Int
+  role              String
+  nameInSpreadsheet String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match             ParsedMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([userId, matchId])
+  @@index([userId])
+  @@map("user_match_assignments")
+}
+
+model WorkerSyncLog {
+  id               Int      @id @default(autoincrement())
+  syncType         String
+  folderKey        String
+  filesChecked     Int      @default(0)
+  filesChanged     Int      @default(0)
+  matchesUpserted  Int      @default(0)
+  assignmentsBuilt Int      @default(0)
+  durationMs       Int      @default(0)
+  errors           String[]
+  startedAt        DateTime @default(now())
+  completedAt      DateTime?
+
+  @@index([startedAt])
+  @@map("worker_sync_logs")
+}
+
+model WorkerSyncState {
+  folderKey         String    @id
+  lastSyncAt        DateTime?
+  lastSuccessAt     DateTime?
+  consecutiveErrors Int       @default(0)
+  isLocked          Boolean   @default(false)
+  lockExpiresAt     DateTime?
+
+  @@map("worker_sync_state")
+}
+
+// ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────
+
+model Penalty {
+  id          Int      @id @default(autoincrement())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  type        String
+  reason      String   @db.Text
+  startDate   DateTime @default(now())
+  endDate     DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isActive, endDate])
+  @@map("penalties")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   String?  @db.Text
+  targetId  Int?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AvailabilityForm {
+  id            Int      @id @default(autoincrement())
+  referee       Referee? @relation(fields: [refereeId], references: [id])
+  refereeId     Int?
+  official      GeneralOfficial? @relation(fields: [officialId], references: [id])
+  officialId    Int?
+  weekStartDate DateTime
+  status        String   @default("DRAFT")
+  days          AvailabilityDay[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([weekStartDate])
+  @@index([refereeId])
+  @@index([officialId])
+  @@map("availability_forms")
+}
+
+model AvailabilityDay {
+  id       Int              @id @default(autoincrement())
+  form     AvailabilityForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  formId   Int
+  date     DateTime
+  slots    String
+
+  @@index([formId])
+  @@map("availability_days")
+}
+
+model SystemSetting {
+  key         String @id
+  value       String
+  description String?
+
+  @@map("system_settings")
+}
+
+model Match {
+  id          Int      @id @default(autoincrement())
+  matchCode   String   @unique
+  league      String
+  homeTeam    String
+  awayTeam    String
+  date        DateTime
+  location    String
+  assignments MatchAssignment[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([matchCode])
+  @@map("matches")
+}
+
+model MatchAssignment {
+  id         Int      @id @default(autoincrement())
+  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchId    Int
+  referee    Referee? @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+  refereeId  Int?
+  official   GeneralOfficial? @relation(fields: [officialId], references: [id], onDelete: Cascade)
+  officialId Int?
+  role       String
+
+  @@index([matchId])
+  @@index([refereeId])
+  @@index([officialId])
+  @@map("match_assignments")
+}
+
+model LoginAttempt {
+  id           Int      @id @default(autoincrement())
+  ipAddress    String   @unique
+  attempts     Int      @default(0)
+  lastAttempt  DateTime @default(now())
+  blockedUntil DateTime?
+
+  @@map("login_attempts")
+}
+
+model Question {
+  id            Int      @id @default(autoincrement())
+  questionText  String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctAnswer String
+  questionType  String   @default("MULTIPLE_CHOICE")
+  category      String?
+  difficulty    String   @default("Orta")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("questions")
+}
+
+model ExamAttempt {
+  id             Int      @id @default(autoincrement())
+  referee        Referee? @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+  refereeId      Int?
+  official       GeneralOfficial? @relation(fields: [officialId], references: [id], onDelete: Cascade)
+  officialId     Int?
+  score          Int
+  totalQuestions Int      @default(20)
+  difficulty     String?
+  answers        UserAnswer[]
+  assignment     ExamAssignment? @relation(fields: [assignmentId], references: [id])
+  assignmentId   Int?
+  createdAt      DateTime @default(now())
+
+  @@index([refereeId])
+  @@index([officialId])
+  @@index([assignmentId])
+  @@map("exam_attempts")
+}
+
+model ExamAssignment {
+  id               Int      @id @default(autoincrement())
+  title            String
+  assignmentType   String
+  targetGroups     String
+  targetCategories String
+  questionCount    Int      @default(20)
+  dueDate          DateTime?
+  isActive         Boolean  @default(true)
+  createdBy        User     @relation(fields: [createdById], references: [id])
+  createdById      Int
+  attempts         ExamAttempt[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("exam_assignments")
+}
+
+model UserAnswer {
+  id             Int         @id @default(autoincrement())
+  attempt        ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  attemptId      Int
+  questionId     Int
+  questionText   String
+  selectedAnswer String
+  correctAnswer  String
+  isCorrect      Boolean
+
+  @@index([attemptId])
+  @@map("user_answers")
+}
+
+model VideoCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  displayOrder Int     @default(0)
+  videos      Video[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("video_categories")
+}
+
+model Video {
+  id              Int      @id @default(autoincrement())
+  title           String
+  url             String
+  description     String?
+  category        String?
+  duration        Int
+  viewCount       Int      @default(0)
+  videoCategory   VideoCategory? @relation(fields: [videoCategoryId], references: [id], onDelete: SetNull)
+  videoCategoryId Int?
+  progress        VideoProgress[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([videoCategoryId])
+  @@map("videos")
+}
+
+model VideoProgress {
+  id           Int      @id @default(autoincrement())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  videoId      Int
+  watched      Boolean  @default(false)
+  lastPosition Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, videoId])
+  @@index([userId])
+  @@map("video_progress")
+}
+
+model ChatSession {
+  id        String    @id @default(uuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  messages  Message[]
+  title     String?   @default("Yeni Sohbet")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("chat_sessions")
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  role      String
+  content   String      @db.Text
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId])
+  @@index([sessionId, createdAt])
+  @@map("messages")
+}
+
+model RuleBook {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  url         String?
+  content     String?  @db.Text
+  category    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("rule_books")
+}
+
+model ReffAIDocument {
+  id          Int      @id @default(autoincrement())
+  fileName    String
+  chunkIndex  Int
+  content     String   @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([fileName])
+  @@map("reffai_documents")
+}
+
+model PendingUpload {
+  id        String        @id @default(uuid())
+  filename  String
+  type      String
+  total     Int           @default(0)
+  chunks    UploadChunk[]
+  createdAt DateTime      @default(now())
+
+  @@map("pending_uploads")
+}
+
+model UploadChunk {
+  id              Int           @id @default(autoincrement())
+  pendingUpload   PendingUpload @relation(fields: [pendingUploadId], references: [id], onDelete: Cascade)
+  pendingUploadId String
+  index           Int
+  data            String        @db.Text
+
+  @@map("upload_chunks")
+}
+
+model Announcement {
+  id        Int      @id @default(autoincrement())
+  subject   String
+  content   String   @db.Text
+  target    String   @default("ALL")
+  sender    User?    @relation(fields: [senderId], references: [id])
+  senderId  Int?
+  sentCount Int      @default(0)
+  createdAt DateTime @default(now())
+  reads     AnnouncementRead[]
+
+  @@index([target, createdAt])
+  @@map("announcements")
+}
+
+model UserMessage {
+  id         Int      @id @default(autoincrement())
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+  senderId   Int
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  receiverId Int
+  content    String   @db.Text
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@map("user_messages")
+}
+
+model ObserverReport {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String   @db.Text
+  imageUrl    String?
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById])
+  @@map("observer_reports")
+}
+
+model AnnouncementRead {
+  id             Int          @id @default(autoincrement())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  announcementId Int
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         Int
+  readAt         DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+  @@map("announcement_reads")
+}
+
+model GameAssignment {
+  id                Int      @id @default(autoincrement())
+  tarih             DateTime
+  saat              String?
+  salon             String?
+  aTeam             String   @default("")
+  bTeam             String   @default("")
+  ligTuru           String?
+  hafta             Int?
+  kategori          String?
+  grup              String?
+  hakem1            String?
+  hakem2            String?
+  sayiGorevlisi     String?
+  saatGorevlisi     String?
+  sutSaatiGorevlisi String?
+  gozlemci          String?
+  sahaKomiseri      String?
+  saglikci          String?
+  istatistikci1     String?
+  istatistikci2     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tarih])
+  @@index([tarih, aTeam, bTeam])
+  @@map("game_assignments")
+}

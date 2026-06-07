@@ -1,0 +1,25 @@
+{
+  "name": "bks-bot",
+  "version": "1.0.0",
+  "description": "BKS Google Drive sync worker — GitHub Actions ile çalışır, Neon DB'ye yazar",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2",
+    "exceljs": "^4.4.0",
+    "google-auth-library": "^9.15.1",
+    "googleapis": "^144.0.0",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "prisma": "^6.19.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
