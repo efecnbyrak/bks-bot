@@ -20,9 +20,10 @@ async function loadActiveUsers(): Promise<UserProfile[]> {
         select: { userId: true, firstName: true, lastName: true },
     });
 
+    type Row = { userId: number; firstName: string; lastName: string };
     return [
-        ...referees.map(r => ({ userId: r.userId, firstName: r.firstName, lastName: r.lastName })),
-        ...officials.map(o => ({ userId: o.userId, firstName: o.firstName, lastName: o.lastName })),
+        ...referees.map((r: Row) => ({ userId: r.userId, firstName: r.firstName, lastName: r.lastName })),
+        ...officials.map((o: Row) => ({ userId: o.userId, firstName: o.firstName, lastName: o.lastName })),
     ];
 }
 
@@ -64,6 +65,7 @@ export async function buildUserAssignments(
     logger.info("Kullanıcı yüklemesi tamamlandı", { count: users.length });
 
     let assignmentCount = 0;
+    const pendingAssignments: { userId: number; matchId: number; role: string; nameInSpreadsheet: string }[] = [];
 
     for (let i = 0; i < matches.length; i++) {
         const match = matches[i];
@@ -85,7 +87,6 @@ export async function buildUserAssignments(
         const nameCache = new Map<string, string | null>(); // personName → matched user name | null
 
         for (const user of users) {
-            // Find which personnel entry matches this user
             let matchedPerson: string | null = null;
 
             for (const person of allPersonnel) {
@@ -106,15 +107,23 @@ export async function buildUserAssignments(
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;
 
-            await upsertUserMatchAssignment(
-                user.userId,
+            pendingAssignments.push({
+                userId: user.userId,
                 matchId,
-                roleInfo.role,
-                roleInfo.nameInSpreadsheet
-            );
-
+                role: roleInfo.role,
+                nameInSpreadsheet: roleInfo.nameInSpreadsheet,
+            });
             assignmentCount++;
         }
+    }
+
+    // Toplu upsert — teker teker değil
+    const ASSIGN_BATCH = 200;
+    for (let i = 0; i < pendingAssignments.length; i += ASSIGN_BATCH) {
+        const batch = pendingAssignments.slice(i, i + ASSIGN_BATCH);
+        await Promise.all(batch.map(a =>
+            upsertUserMatchAssignment(a.userId, a.matchId, a.role, a.nameInSpreadsheet)
+        ));
     }
 
     logger.info("Atama oluşturma tamamlandı", { assignmentCount });

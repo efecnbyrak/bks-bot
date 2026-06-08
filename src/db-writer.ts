@@ -56,62 +56,86 @@ export async function upsertDriveFile(
     return record.id;
 }
 
+const BATCH_SIZE = 500;
+
 export async function upsertParsedMatches(
     matches: MatchData[],
     driveFileDbId: number,
     sezon: string
 ): Promise<number[]> {
-    const ids: number[] = [];
+    const rows = matches.map(match => ({
+        matchKey: computeMatchKey(match),
+        macAdi: match.mac_adi,
+        tarih: match.tarih,
+        tarihDate: parseTarihDate(match.tarih),
+        saat: match.saat ?? null,
+        salon: match.salon ?? null,
+        kategori: match.kategori,
+        hafta: match.hafta ?? null,
+        sezon,
+        ligTuru: match.ligTuru,
+        hakemler: match.hakemler,
+        masaGorevlileri: match.masa_gorevlileri,
+        saglikcilar: match.saglikcilar,
+        istatistikciler: match.istatistikciler,
+        gozlemciler: match.gozlemciler,
+        sahaKomiserleri: match.sahaKomiserleri,
+        kaynakDosya: match.kaynak_dosya,
+        driveFileId: driveFileDbId,
+    }));
 
-    for (const match of matches) {
-        const matchKey = computeMatchKey(match);
-        const tarihDate = parseTarihDate(match.tarih);
+    // Batch insert: skip duplicates on matchKey, then update changed rows
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        await db.parsedMatch.createMany({ data: batch, skipDuplicates: true });
 
-        const record = await db.parsedMatch.upsert({
-            where: { matchKey },
-            create: {
-                matchKey,
-                macAdi: match.mac_adi,
-                tarih: match.tarih,
-                tarihDate,
-                saat: match.saat ?? null,
-                salon: match.salon ?? null,
-                kategori: match.kategori,
-                hafta: match.hafta ?? null,
-                sezon,
-                ligTuru: match.ligTuru,
-                hakemler: match.hakemler,
-                masaGorevlileri: match.masa_gorevlileri,
-                saglikcilar: match.saglikcilar,
-                istatistikciler: match.istatistikciler,
-                gozlemciler: match.gozlemciler,
-                sahaKomiserleri: match.sahaKomiserleri,
-                kaynakDosya: match.kaynak_dosya,
-                driveFileId: driveFileDbId,
-            },
-            update: {
-                macAdi: match.mac_adi,
-                tarih: match.tarih,
-                tarihDate,
-                saat: match.saat ?? null,
-                salon: match.salon ?? null,
-                kategori: match.kategori,
-                hafta: match.hafta ?? null,
-                sezon,
-                ligTuru: match.ligTuru,
-                hakemler: match.hakemler,
-                masaGorevlileri: match.masa_gorevlileri,
-                saglikcilar: match.saglikcilar,
-                istatistikciler: match.istatistikciler,
-                gozlemciler: match.gozlemciler,
-                sahaKomiserleri: match.sahaKomiserleri,
-                kaynakDosya: match.kaynak_dosya,
-                driveFileId: driveFileDbId,
-            },
+        // Update existing rows in this batch (createMany skips them, we need to sync changes)
+        const keys = batch.map(r => r.matchKey);
+        const existing = await db.parsedMatch.findMany({
+            where: { matchKey: { in: keys } },
+            select: { id: true, matchKey: true },
         });
+        const existingKeys = new Set(existing.map((e: { matchKey: string }) => e.matchKey));
+        const toUpdate = batch.filter(r => existingKeys.has(r.matchKey));
 
-        ids.push(record.id);
+        if (toUpdate.length > 0) {
+            await Promise.all(
+                toUpdate.map(r =>
+                    db.parsedMatch.update({
+                        where: { matchKey: r.matchKey },
+                        data: {
+                            macAdi: r.macAdi,
+                            tarih: r.tarih,
+                            tarihDate: r.tarihDate,
+                            saat: r.saat,
+                            salon: r.salon,
+                            kategori: r.kategori,
+                            hafta: r.hafta,
+                            sezon: r.sezon,
+                            ligTuru: r.ligTuru,
+                            hakemler: r.hakemler,
+                            masaGorevlileri: r.masaGorevlileri,
+                            saglikcilar: r.saglikcilar,
+                            istatistikciler: r.istatistikciler,
+                            gozlemciler: r.gozlemciler,
+                            sahaKomiserleri: r.sahaKomiserleri,
+                            kaynakDosya: r.kaynakDosya,
+                            driveFileId: r.driveFileId,
+                        },
+                    })
+                )
+            );
+        }
     }
+
+    // Fetch all IDs in order
+    const allKeys = rows.map(r => r.matchKey);
+    const saved = await db.parsedMatch.findMany({
+        where: { matchKey: { in: allKeys } },
+        select: { id: true, matchKey: true },
+    });
+    const keyToId = new Map(saved.map((r: { matchKey: string; id: number }) => [r.matchKey, r.id]));
+    const ids = rows.map(r => keyToId.get(r.matchKey)).filter((id): id is number => id !== undefined);
 
     logger.info("ParsedMatch upsert tamamlandı", { count: ids.length });
     return ids;
@@ -151,7 +175,7 @@ export async function writeSyncLog(params: {
 
 export async function acquireLock(folderKey: string): Promise<boolean> {
     const now = new Date();
-    const lockExpiry = new Date(now.getTime() + 10 * 60 * 1000); // 10 dakika
+    const lockExpiry = new Date(now.getTime() + 360 * 60 * 1000); // 6 saat
 
     const existing = await db.workerSyncState.findUnique({ where: { folderKey } });
 

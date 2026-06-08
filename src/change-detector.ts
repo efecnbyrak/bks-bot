@@ -34,7 +34,8 @@ export async function detectChanges(
         },
     });
 
-    const existingMap = new Map(existing.map(e => [e.driveFileId, e]));
+    type DriveFileRow = { driveFileId: string; lastProcessedMd5: string | null; modifiedTime: Date | null };
+    const existingMap = new Map<string, DriveFileRow>(existing.map((e: DriveFileRow) => [e.driveFileId, e]));
 
     const toProcess: DriveSpreadsheet[] = [];
     const unchanged: DriveSpreadsheet[] = [];
