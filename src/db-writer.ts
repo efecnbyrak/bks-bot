@@ -99,32 +99,30 @@ export async function upsertParsedMatches(
         const toUpdate = batch.filter(r => existingKeys.has(r.matchKey));
 
         if (toUpdate.length > 0) {
-            await Promise.all(
-                toUpdate.map(r =>
-                    db.parsedMatch.update({
-                        where: { matchKey: r.matchKey },
-                        data: {
-                            macAdi: r.macAdi,
-                            tarih: r.tarih,
-                            tarihDate: r.tarihDate,
-                            saat: r.saat,
-                            salon: r.salon,
-                            kategori: r.kategori,
-                            hafta: r.hafta,
-                            sezon: r.sezon,
-                            ligTuru: r.ligTuru,
-                            hakemler: r.hakemler,
-                            masaGorevlileri: r.masaGorevlileri,
-                            saglikcilar: r.saglikcilar,
-                            istatistikciler: r.istatistikciler,
-                            gozlemciler: r.gozlemciler,
-                            sahaKomiserleri: r.sahaKomiserleri,
-                            kaynakDosya: r.kaynakDosya,
-                            driveFileId: r.driveFileId,
-                        },
-                    })
-                )
-            );
+            for (const r of toUpdate) {
+                await db.parsedMatch.update({
+                    where: { matchKey: r.matchKey },
+                    data: {
+                        macAdi: r.macAdi,
+                        tarih: r.tarih,
+                        tarihDate: r.tarihDate,
+                        saat: r.saat,
+                        salon: r.salon,
+                        kategori: r.kategori,
+                        hafta: r.hafta,
+                        sezon: r.sezon,
+                        ligTuru: r.ligTuru,
+                        hakemler: r.hakemler,
+                        masaGorevlileri: r.masaGorevlileri,
+                        saglikcilar: r.saglikcilar,
+                        istatistikciler: r.istatistikciler,
+                        gozlemciler: r.gozlemciler,
+                        sahaKomiserleri: r.sahaKomiserleri,
+                        kaynakDosya: r.kaynakDosya,
+                        driveFileId: r.driveFileId,
+                    },
+                });
+            }
         }
     }
 
