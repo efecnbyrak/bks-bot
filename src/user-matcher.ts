@@ -83,10 +83,9 @@ export async function buildUserAssignments(
 
         if (allPersonnel.length === 0) continue;
 
-        // Memoize nameMatches for this match's personnel list
-        const nameCache = new Map<string, string | null>(); // personName → matched user name | null
-
         for (const user of users) {
+            // Cache her kullanıcı için sıfırlanır — farklı kullanıcıların sonuçları karışmaz
+            const nameCache = new Map<string, string | null>();
             let matchedPerson: string | null = null;
 
             for (const person of allPersonnel) {
