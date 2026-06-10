@@ -116,8 +116,8 @@ export async function buildUserAssignments(
         }
     }
 
-    // Toplu upsert — teker teker değil
-    const ASSIGN_BATCH = 200;
+    // Pool limit (5) aşılmasın diye küçük batch — 200 paralel pool'u tüketiyordu
+    const ASSIGN_BATCH = 5;
     for (let i = 0; i < pendingAssignments.length; i += ASSIGN_BATCH) {
         const batch = pendingAssignments.slice(i, i + ASSIGN_BATCH);
         await Promise.all(batch.map(a =>

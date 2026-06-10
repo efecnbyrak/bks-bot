@@ -5,6 +5,7 @@ import { upsertDriveFile, upsertParsedMatches, writeSyncLog, acquireLock, releas
 import { buildUserAssignments } from "./user-matcher";
 import { getFolderConfig, getFolderIdString, getSyncMode } from "./config";
 import { logger } from "./logger";
+import { db } from "./db";
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -28,6 +29,15 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 }
 
 export async function runSync(folderKey: string): Promise<void> {
+    // Verify DB is reachable before doing anything — throws on connection failure
+    try {
+        await db.$queryRaw`SELECT 1`;
+    } catch (err: any) {
+        const msg: string = err?.message ?? "";
+        logger.warn("DB bağlantısı kurulamadı — sync atlandı", { error: msg });
+        throw err; // index.ts'deki isDbConnError handler'ı yakalar
+    }
+
     const startedAt = new Date();
     const startMs = Date.now();
     const errors: string[] = [];

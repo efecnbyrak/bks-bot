@@ -15,10 +15,24 @@ async function main() {
     try {
         await runSync(folderKey);
     } catch (err: any) {
-        logger.error("Beklenmeyen hata — işlem sonlandırılıyor", { error: err?.message });
+        const errMsg: string = err?.message ?? "";
+        const isDbConnError =
+            err?.constructor?.name === "PrismaClientInitializationError" ||
+            errMsg.includes("Can't reach database server") ||
+            errMsg.includes("ECONNREFUSED") ||
+            errMsg.includes("connection refused") ||
+            errMsg.includes("Connection timed out");
+
+        if (isDbConnError) {
+            logger.warn("Veritabanına ulaşılamadı — işlem atlandı, job başarısız sayılmıyor", { error: errMsg });
+            await db.$disconnect().catch(() => {});
+            process.exit(0);
+        }
+
+        logger.error("Beklenmeyen hata — işlem sonlandırılıyor", { error: errMsg });
         process.exit(1);
     } finally {
-        await db.$disconnect();
+        await db.$disconnect().catch(() => {});
     }
 
     logger.info("bks-bot tamamlandı");
