@@ -7,7 +7,8 @@ import { logger } from "./logger";
 function computeMatchKey(match: MatchData): string {
     const hakemlerSorted = [...match.hakemler].sort().join("|");
     const masaSorted = [...match.masa_gorevlileri].sort().join("|");
-    const raw = `${match.mac_adi}|${match.tarih}|${match.saat ?? ""}|${match.salon ?? ""}|${hakemlerSorted}|${masaSorted}`;
+    const norm = (s: string) => (s ?? "").trim().toLowerCase();
+    const raw = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}|${norm(match.salon ?? "")}|${hakemlerSorted}|${masaSorted}`;
     return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
 }
 

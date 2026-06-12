@@ -130,7 +130,7 @@ function cellToString(cell: any): string {
         return String(cell).trim();
     }
     if (typeof cell === "number" && cell > 0 && cell < 1) {
-        const totalMinutes = Math.round(cell * 24 * 60);
+        const totalMinutes = Math.floor(cell * 24 * 60);
         const h = Math.floor(totalMinutes / 60).toString().padStart(2, "0");
         const m = (totalMinutes % 60).toString().padStart(2, "0");
         return `${h}:${m}`;
