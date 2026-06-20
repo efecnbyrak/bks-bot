@@ -4,7 +4,7 @@ import { MatchData } from "./lib/match-parser";
 import { DriveSpreadsheet } from "./lib/google-drive";
 import { logger } from "./logger";
 
-function computeMatchKey(match: MatchData): string {
+export function computeMatchKey(match: MatchData): string {
     const hakemlerSorted = [...match.hakemler].sort().join("|");
     const masaSorted = [...match.masa_gorevlileri].sort().join("|");
     const norm = (s: string) => (s ?? "").trim().toLowerCase();
@@ -208,4 +208,83 @@ export async function releaseLock(folderKey: string, success: boolean): Promise<
                 : { increment: 1 },
         },
     });
+}
+
+export interface CancelledMatchInfo {
+    matchId: number;
+    matchKey: string;
+    macAdi: string;
+    tarih: string;
+    affectedUserIds: number[];
+}
+
+export async function detectAndMarkCancelledMatches(
+    driveFileDbId: number,
+    currentMatchKeys: Set<string>
+): Promise<CancelledMatchInfo[]> {
+    const existingMatches = await db.parsedMatch.findMany({
+        where: {
+            driveFileId: driveFileDbId,
+            cancelledAt: null,
+        },
+        select: {
+            id: true,
+            matchKey: true,
+            macAdi: true,
+            tarih: true,
+            userAssignments: {
+                select: { userId: true },
+            },
+        },
+    });
+
+    const cancelled: CancelledMatchInfo[] = [];
+
+    for (const match of existingMatches) {
+        if (!currentMatchKeys.has(match.matchKey)) {
+            cancelled.push({
+                matchId: match.id,
+                matchKey: match.matchKey,
+                macAdi: match.macAdi,
+                tarih: match.tarih,
+                affectedUserIds: match.userAssignments.map((a: { userId: number }) => a.userId),
+            });
+        }
+    }
+
+    if (cancelled.length > 0) {
+        await db.parsedMatch.updateMany({
+            where: { id: { in: cancelled.map(c => c.matchId) } },
+            data: { cancelledAt: new Date(), cancelReason: "E-tabloda bulunamadı" },
+        });
+        logger.info("İptal edilen maçlar işaretlendi", { count: cancelled.length });
+    }
+
+    return cancelled;
+}
+
+export async function createCancellationAnnouncements(
+    cancelledMatches: CancelledMatchInfo[]
+): Promise<void> {
+    for (const match of cancelledMatches) {
+        if (match.affectedUserIds.length === 0) continue;
+
+        const target = `SPECIFIC:${match.affectedUserIds.join(",")}`;
+        const subject = `Maç İadesi: ${match.macAdi}`;
+        const content = `<p>${match.tarih} tarihindeki <strong>${match.macAdi}</strong> maçı iptal edildi / iade edildi.</p><p>Bu bildirim BKS sistemi tarafından otomatik olarak oluşturulmuştur.</p>`;
+
+        await db.announcement.create({
+            data: {
+                subject,
+                content,
+                target,
+                senderId: null,
+                sentCount: match.affectedUserIds.length,
+            },
+        });
+    }
+
+    if (cancelledMatches.length > 0) {
+        logger.info("İptal duyuruları oluşturuldu", { count: cancelledMatches.length });
+    }
 }

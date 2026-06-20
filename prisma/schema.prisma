@@ -185,6 +185,8 @@ model ParsedMatch {
   kaynakDosya     String
   driveFileId     Int
   driveFile       DriveFile @relation(fields: [driveFileId], references: [id], onDelete: Cascade)
+  cancelledAt     DateTime?
+  cancelReason    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -238,6 +240,17 @@ model WorkerSyncState {
   lockExpiresAt     DateTime?
 
   @@map("worker_sync_state")
+}
+
+model PushToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("push_tokens")
 }
 
 // ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────

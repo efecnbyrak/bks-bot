@@ -1,8 +1,18 @@
 import { findAllSpreadsheets } from "./lib/google-drive";
 import { parseWorkbook } from "./lib/match-parser";
 import { detectChanges } from "./change-detector";
-import { upsertDriveFile, upsertParsedMatches, writeSyncLog, acquireLock, releaseLock } from "./db-writer";
+import {
+    upsertDriveFile,
+    upsertParsedMatches,
+    writeSyncLog,
+    acquireLock,
+    releaseLock,
+    computeMatchKey,
+    detectAndMarkCancelledMatches,
+    createCancellationAnnouncements,
+} from "./db-writer";
 import { buildUserAssignments } from "./user-matcher";
+import { sendCancellationPush } from "./lib/push-sender";
 import { getFolderConfig, getFolderIdString, getSyncMode } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
@@ -41,6 +51,21 @@ export async function runSync(folderKey: string): Promise<void> {
     const startedAt = new Date();
     const startMs = Date.now();
     const errors: string[] = [];
+
+    // Jitter: son başarılı sync'ten beri 15-30 dk rastgele bir cooldown geçmediyse atla
+    const syncState = await db.workerSyncState.findUnique({ where: { folderKey } });
+    if (syncState?.lastSuccessAt) {
+        const elapsedMin = (Date.now() - syncState.lastSuccessAt.getTime()) / 60000;
+        const requiredMin = 15 + Math.random() * 15; // [15, 30)
+        if (elapsedMin < requiredMin) {
+            logger.info("Jitter: henüz erken — sync atlandı", {
+                folderKey,
+                elapsedMin: Math.round(elapsedMin * 10) / 10,
+                requiredMin: Math.round(requiredMin * 10) / 10,
+            });
+            return;
+        }
+    }
 
     const locked = await acquireLock(folderKey);
     if (!locked) {
@@ -118,6 +143,22 @@ export async function runSync(folderKey: string): Promise<void> {
                 // Kullanıcı atamalarını oluştur
                 const assigned = await buildUserAssignments(matches, matchIds);
                 assignmentsBuilt += assigned;
+
+                // İptal tespiti: bu dosyadan önceki çalıştırmada olan ama artık e-tabloda bulunmayan maçlar
+                const currentMatchKeys = new Set(matches.map(m => computeMatchKey(m)));
+                const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, currentMatchKeys);
+                if (cancelled.length > 0) {
+                    await createCancellationAnnouncements(cancelled);
+                    for (const c of cancelled) {
+                        if (c.affectedUserIds.length > 0) {
+                            await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
+                        }
+                    }
+                    logger.info("İptal akışı tamamlandı", {
+                        cancelledCount: cancelled.length,
+                        affectedUsers: [...new Set(cancelled.flatMap(c => c.affectedUserIds))].length,
+                    });
+                }
 
             } catch (err: any) {
                 const errMsg = err?.message || "Bilinmeyen hata";
