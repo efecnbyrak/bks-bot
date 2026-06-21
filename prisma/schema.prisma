@@ -167,6 +167,7 @@ model DriveFile {
 model ParsedMatch {
   id              Int       @id @default(autoincrement())
   matchKey        String    @unique
+  contentKey      String?   @db.VarChar(32)
   macAdi          String
   tarih           String
   tarihDate       DateTime?
@@ -195,6 +196,7 @@ model ParsedMatch {
   @@index([tarihDate])
   @@index([sezon])
   @@index([driveFileId])
+  @@index([contentKey])
   @@map("parsed_matches")
 }
 

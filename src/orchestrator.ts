@@ -7,7 +7,6 @@ import {
     writeSyncLog,
     acquireLock,
     releaseLock,
-    computeMatchKey,
     detectAndMarkCancelledMatches,
     createCancellationAnnouncements,
 } from "./db-writer";
@@ -144,9 +143,9 @@ export async function runSync(folderKey: string): Promise<void> {
                 const assigned = await buildUserAssignments(matches, matchIds);
                 assignmentsBuilt += assigned;
 
-                // İptal tespiti: bu dosyadan önceki çalıştırmada olan ama artık e-tabloda bulunmayan maçlar
-                const currentMatchKeys = new Set(matches.map(m => computeMatchKey(m)));
-                const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, currentMatchKeys);
+                // İptal tespiti: bu dosyadaki atamalar kontrol edilir;
+                // arşive taşıma değil, hakem listesinden isim silinmesi iade sayılır
+                const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, matches);
                 if (cancelled.length > 0) {
                     await createCancellationAnnouncements(cancelled);
                     for (const c of cancelled) {

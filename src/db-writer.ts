@@ -12,6 +12,14 @@ export function computeMatchKey(match: MatchData): string {
     return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
 }
 
+// Hakemler/masa dahil etmeden maç kimliğini hashler.
+// Aynı maçın farklı dosyalara (arşiv dahil) taşınıp taşınmadığını tespit etmek için kullanılır.
+export function computeContentKey(match: MatchData): string {
+    const norm = (s: string) => (s ?? "").trim().toLowerCase();
+    const raw = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}|${norm(match.salon ?? "")}`;
+    return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
+}
+
 function parseTarihDate(tarih: string): Date | null {
     if (!tarih) return null;
     const match = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
@@ -66,6 +74,7 @@ export async function upsertParsedMatches(
 ): Promise<number[]> {
     const rows = matches.map(match => ({
         matchKey: computeMatchKey(match),
+        contentKey: computeContentKey(match),
         macAdi: match.mac_adi,
         tarih: match.tarih,
         tarihDate: parseTarihDate(match.tarih),
@@ -107,6 +116,7 @@ export async function upsertParsedMatches(
                     db.parsedMatch.update({
                         where: { matchKey: r.matchKey },
                         data: {
+                            contentKey: r.contentKey,
                             macAdi: r.macAdi,
                             tarih: r.tarih,
                             tarihDate: r.tarihDate,
@@ -220,42 +230,99 @@ export interface CancelledMatchInfo {
 
 export async function detectAndMarkCancelledMatches(
     driveFileDbId: number,
-    currentMatchKeys: Set<string>
+    currentMatches: MatchData[]
 ): Promise<CancelledMatchInfo[]> {
-    const existingMatches = await db.parsedMatch.findMany({
+    // currentContentKeys: bu dosyada şu an hangi maçlar var (hakemlerden bağımsız kimlik)
+    const currentContentKeys = new Set(currentMatches.map(m => computeContentKey(m)));
+
+    // contentKey → hakemler listesi eşlemesi (kimin ismi var diye bakmak için)
+    const currentMatchByContentKey = new Map<string, MatchData>();
+    for (const m of currentMatches) {
+        currentContentKeys.add(computeContentKey(m));
+        currentMatchByContentKey.set(computeContentKey(m), m);
+    }
+
+    // Bu dosyaya atanmış, henüz iptal edilmemiş kullanıcı atamalarını al
+    const existingAssignments = await db.userMatchAssignment.findMany({
         where: {
-            driveFileId: driveFileDbId,
-            cancelledAt: null,
+            match: {
+                driveFileId: driveFileDbId,
+                cancelledAt: null,
+            },
         },
         select: {
-            id: true,
-            matchKey: true,
-            macAdi: true,
-            tarih: true,
-            userAssignments: {
-                select: { userId: true },
+            userId: true,
+            nameInSpreadsheet: true,
+            match: {
+                select: {
+                    id: true,
+                    matchKey: true,
+                    contentKey: true,
+                    macAdi: true,
+                    tarih: true,
+                },
             },
         },
     });
 
-    const cancelled: CancelledMatchInfo[] = [];
+    // matchId → CancelledMatchInfo (birden fazla kullanıcı aynı maçta olabilir)
+    const cancelledMap = new Map<number, CancelledMatchInfo>();
 
-    for (const match of existingMatches) {
-        if (!currentMatchKeys.has(match.matchKey)) {
-            cancelled.push({
-                matchId: match.id,
-                matchKey: match.matchKey,
-                macAdi: match.macAdi,
-                tarih: match.tarih,
-                affectedUserIds: match.userAssignments.map((a: { userId: number }) => a.userId),
-            });
+    for (const assignment of existingAssignments) {
+        const match = assignment.match;
+        const contentKey = match.contentKey;
+
+        // contentKey yoksa eski kayıt — matchKey ile kontrol et (geçiş dönemi güvencesi)
+        if (!contentKey) continue;
+
+        if (!currentContentKeys.has(contentKey)) {
+            // Maç bu dosyada artık yok (ve başka bir dosyaya da taşınmamış) → iade
+            if (!cancelledMap.has(match.id)) {
+                cancelledMap.set(match.id, {
+                    matchId: match.id,
+                    matchKey: match.matchKey,
+                    macAdi: match.macAdi,
+                    tarih: match.tarih,
+                    affectedUserIds: [],
+                });
+            }
+            cancelledMap.get(match.id)!.affectedUserIds.push(assignment.userId);
+        } else {
+            // Maç hâlâ tabloda var — ama bu kullanıcının ismi hakem listesinden silindi mi?
+            const currentMatch = currentMatchByContentKey.get(contentKey)!;
+            const normName = (s: string) => s.trim().toLowerCase();
+            const userNorm = normName(assignment.nameInSpreadsheet);
+            const stillAssigned = [
+                ...currentMatch.hakemler,
+                ...currentMatch.masa_gorevlileri,
+                ...currentMatch.saglikcilar,
+                ...currentMatch.istatistikciler,
+                ...currentMatch.gozlemciler,
+                ...currentMatch.sahaKomiserleri,
+            ].some(n => normName(n) === userNorm);
+
+            if (!stillAssigned) {
+                // İsim silindi → iade
+                if (!cancelledMap.has(match.id)) {
+                    cancelledMap.set(match.id, {
+                        matchId: match.id,
+                        matchKey: match.matchKey,
+                        macAdi: match.macAdi,
+                        tarih: match.tarih,
+                        affectedUserIds: [],
+                    });
+                }
+                cancelledMap.get(match.id)!.affectedUserIds.push(assignment.userId);
+            }
         }
     }
+
+    const cancelled = [...cancelledMap.values()];
 
     if (cancelled.length > 0) {
         await db.parsedMatch.updateMany({
             where: { id: { in: cancelled.map(c => c.matchId) } },
-            data: { cancelledAt: new Date(), cancelReason: "E-tabloda bulunamadı" },
+            data: { cancelledAt: new Date(), cancelReason: "Hakem listesinden çıkarıldı" },
         });
         logger.info("İptal edilen maçlar işaretlendi", { count: cancelled.length });
     }
