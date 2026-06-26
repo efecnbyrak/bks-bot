@@ -101,7 +101,11 @@ export async function buildUserAssignments(
                 }
             }
 
-            if (!matchedPerson) continue;
+            if (!matchedPerson) {
+                // debug modunda eşleşmeyen kullanıcıları logla — isim formatı değişikliğini tespit etmek için
+                logger.debug("İsim eşleşmedi", { firstName: user.firstName, lastName: user.lastName, matchPersonnel: allPersonnel.slice(0, 5) });
+                continue;
+            }
 
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;

@@ -55,7 +55,7 @@ export async function runSync(folderKey: string): Promise<void> {
     const syncState = await db.workerSyncState.findUnique({ where: { folderKey } });
     if (syncState?.lastSuccessAt) {
         const elapsedMin = (Date.now() - syncState.lastSuccessAt.getTime()) / 60000;
-        const requiredMin = 15 + Math.random() * 15; // [15, 30)
+        const requiredMin = 12 + Math.random() * 6; // [12, 18) — 15 dk'lık Actions cadence'ı ile örtüşür
         if (elapsedMin < requiredMin) {
             logger.info("Jitter: henüz erken — sync atlandı", {
                 folderKey,
@@ -147,13 +147,14 @@ export async function runSync(folderKey: string): Promise<void> {
                 // arşive taşıma değil, hakem listesinden isim silinmesi iade sayılır
                 const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, matches);
                 if (cancelled.length > 0) {
-                    await createCancellationAnnouncements(cancelled);
-                    for (const c of cancelled) {
-                        if (c.affectedUserIds.length > 0) {
-                            await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
-                        }
-                    }
-                    logger.info("İptal akışı tamamlandı", {
+                    // Şimdilik iade bildirimleri kapatıldı — açmak için aşağıdaki yorumları kaldır
+                    // await createCancellationAnnouncements(cancelled);
+                    // for (const c of cancelled) {
+                    //     if (c.affectedUserIds.length > 0) {
+                    //         await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
+                    //     }
+                    // }
+                    logger.info("İptal tespit edildi (bildirim kapalı)", {
                         cancelledCount: cancelled.length,
                         affectedUsers: [...new Set(cancelled.flatMap(c => c.affectedUserIds))].length,
                     });
