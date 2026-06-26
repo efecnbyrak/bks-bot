@@ -57,3 +57,8 @@ export function getSyncFolderKey(): string {
     if (!DRIVE_FOLDERS[key]) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}"`);
     return key;
 }
+
+// FORCE_SYNC=true ise jitter atlanır — elle tetiklemede kullanılır
+export function isForceSync(): boolean {
+    return process.env.FORCE_SYNC === "true";
+}

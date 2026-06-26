@@ -12,7 +12,7 @@ import {
 } from "./db-writer";
 import { buildUserAssignments } from "./user-matcher";
 import { sendCancellationPush } from "./lib/push-sender";
-import { getFolderConfig, getFolderIdString, getSyncMode } from "./config";
+import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
 
@@ -51,11 +51,12 @@ export async function runSync(folderKey: string): Promise<void> {
     const startMs = Date.now();
     const errors: string[] = [];
 
-    // Jitter: son başarılı sync'ten beri 15-30 dk rastgele bir cooldown geçmediyse atla
+    // Jitter: son başarılı sync'ten beri [12,18) dk geçmediyse atla.
+    // FORCE_SYNC=true ise (elle tetikleme) jitter bypass edilir.
     const syncState = await db.workerSyncState.findUnique({ where: { folderKey } });
-    if (syncState?.lastSuccessAt) {
+    if (syncState?.lastSuccessAt && !isForceSync()) {
         const elapsedMin = (Date.now() - syncState.lastSuccessAt.getTime()) / 60000;
-        const requiredMin = 12 + Math.random() * 6; // [12, 18) — 15 dk'lık Actions cadence'ı ile örtüşür
+        const requiredMin = 12 + Math.random() * 6; // [12, 18)
         if (elapsedMin < requiredMin) {
             logger.info("Jitter: henüz erken — sync atlandı", {
                 folderKey,

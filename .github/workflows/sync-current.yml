@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      force_sync:
+        description: 'Jitter atla ve zorla sync yap'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
   sync:
@@ -29,6 +36,7 @@ jobs:
         env:
           SYNC_FOLDER_KEY: current
           SYNC_MODE: normal
+          FORCE_SYNC: ${{ github.event.inputs.force_sync || 'false' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
