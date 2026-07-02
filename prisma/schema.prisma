@@ -36,15 +36,20 @@ model User {
   lastLoginAt          DateTime?
   pendingEmail         String?
   matchStore           Json?
+  matchRefreshQuota    Json?
   resetPasswordCode    String?
   resetPasswordExpiresAt DateTime?
   recoveryCode         String?  @unique
   videoProgress        VideoProgress[]
+  sectionVisits        SectionVisit[]
+  ruleProgress         RuleProgress[]
   chats                ChatSession[]
   securityQuestion     String?
   securityAnswer       String?
   mobileToken          String?  @unique
   mobileTokenExpiry    DateTime?
+  mobileTokenApp       String?  @unique
+  mobileTokenAppExpiry DateTime?
   passwordResetRequired Boolean @default(false)
   auditLogs            AuditLog[]
   announcements        Announcement[]
@@ -52,9 +57,11 @@ model User {
   sentMessages         UserMessage[] @relation("SentMessages")
   receivedMessages     UserMessage[] @relation("ReceivedMessages")
   observerReports      ObserverReport[]
+  supportTickets       SupportTicket[]
   createdAssignments   ExamAssignment[]
   announcementReads    AnnouncementRead[]
   userMatchAssignments UserMatchAssignment[]
+  pushTokens           PushToken[]
 
   @@index([id])
   @@index([username])
@@ -247,6 +254,7 @@ model WorkerSyncState {
 model PushToken {
   id        Int      @id @default(autoincrement())
   userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   token     String   @unique
   platform  String
   createdAt DateTime @default(now())
@@ -611,6 +619,32 @@ model AnnouncementRead {
   @@map("announcement_reads")
 }
 
+model SectionVisit {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  section   String
+  visitedAt DateTime @default(now())
+
+  @@unique([userId, section])
+  @@index([userId])
+  @@map("section_visits")
+}
+
+model RuleProgress {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  articleId String
+  type      String
+  readAt    DateTime @default(now())
+
+  @@unique([userId, articleId, type])
+  @@index([userId])
+  @@index([userId, type])
+  @@map("rule_progress")
+}
+
 model GameAssignment {
   id                Int      @id @default(autoincrement())
   tarih             DateTime
@@ -638,4 +672,27 @@ model GameAssignment {
   @@index([tarih])
   @@index([tarih, aTeam, bTeam])
   @@map("game_assignments")
+}
+
+model SupportTicket {
+  id          Int      @id @default(autoincrement())
+  user        User?    @relation(fields: [userId], references: [id])
+  userId      Int?
+  guestEmail  String?
+  type        String   @default("DESTEK")
+  errorType   String
+  subject     String
+  description String   @db.Text
+  imageUrls   String?  @db.Text
+  status      String   @default("OPEN")
+  adminNote   String?  @db.Text
+  replySeenAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@map("support_tickets")
 }
