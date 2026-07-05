@@ -11,12 +11,12 @@ interface UserProfile {
 
 async function loadActiveUsers(): Promise<UserProfile[]> {
     const referees = await db.referee.findMany({
-        where: { user: { isActive: true, isApproved: true } },
+        where: { user: { isActive: true } },
         select: { userId: true, firstName: true, lastName: true },
     });
 
     const officials = await db.generalOfficial.findMany({
-        where: { user: { isActive: true, isApproved: true } },
+        where: { user: { isActive: true } },
         select: { userId: true, firstName: true, lastName: true },
     });
 
@@ -102,8 +102,8 @@ export async function buildUserAssignments(
             }
 
             if (!matchedPerson) {
-                // debug modunda eşleşmeyen kullanıcıları logla — isim formatı değişikliğini tespit etmek için
-                logger.debug("İsim eşleşmedi", { firstName: user.firstName, lastName: user.lastName, matchPersonnel: allPersonnel.slice(0, 5) });
+                // production loglarında görünsün diye warn seviyesinde — isim formatı değişikliğini tespit etmek için
+                logger.warn("İsim eşleşmedi", { firstName: user.firstName, lastName: user.lastName, matchPersonnel: allPersonnel.slice(0, 5) });
                 continue;
             }
 
