@@ -51,11 +51,16 @@ export function getSyncMode(): "normal" | "archive-full" {
     return mode === "archive-full" ? "archive-full" : "normal";
 }
 
-export function getSyncFolderKey(): string {
-    const key = process.env.SYNC_FOLDER_KEY;
-    if (!key) throw new Error("SYNC_FOLDER_KEY env var tanımlı değil.");
-    if (!DRIVE_FOLDERS[key]) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}"`);
-    return key;
+// SYNC_FOLDER_KEY virgülle ayrılmış birden fazla anahtar içerebilir (örn. "current,2025-2026") —
+// federasyon sezon geçişinde güncel maçları bazen arşiv klasörüne de ekleyebiliyor
+export function getSyncFolderKeys(): string[] {
+    const raw = process.env.SYNC_FOLDER_KEY;
+    if (!raw) throw new Error("SYNC_FOLDER_KEY env var tanımlı değil.");
+    const keys = raw.split(",").map(k => k.trim()).filter(Boolean);
+    for (const key of keys) {
+        if (!DRIVE_FOLDERS[key]) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}"`);
+    }
+    return keys;
 }
 
 // FORCE_SYNC=true ise jitter atlanır — elle tetiklemede kullanılır

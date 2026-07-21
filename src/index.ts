@@ -1,19 +1,23 @@
-import { getSyncFolderKey } from "./config";
+import { getSyncFolderKeys } from "./config";
 import { runSync } from "./orchestrator";
 import { logger } from "./logger";
 import { db } from "./db";
 
 async function main() {
-    const folderKey = getSyncFolderKey();
+    const folderKeys = getSyncFolderKeys();
 
     logger.info("bks-bot başlıyor", {
-        folderKey,
+        folderKeys,
         syncMode: process.env.SYNC_MODE ?? "normal",
         nodeVersion: process.version,
     });
 
     try {
-        await runSync(folderKey);
+        // Birden fazla klasör anahtarı (virgülle ayrılmış) verildiyse hepsini sırayla senkronize et —
+        // federasyon "current" dışında arşiv klasörüne de güncel maç ekleyebiliyor, ikisi de otomatik taranmalı
+        for (const folderKey of folderKeys) {
+            await runSync(folderKey);
+        }
     } catch (err: any) {
         const errMsg: string = err?.message ?? "";
         const isDbConnError =

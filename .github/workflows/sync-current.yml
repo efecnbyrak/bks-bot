@@ -39,7 +39,9 @@ jobs:
       - name: Run sync
         run: node dist/index.js
         env:
-          SYNC_FOLDER_KEY: current
+          # current dışında 2025-2026 arşivi de taranır — federasyon sezon geçişinde
+          # güncel maçları bazen hâlâ arşiv klasörüne ekleyebiliyor
+          SYNC_FOLDER_KEY: current,2025-2026
           SYNC_MODE: normal
           FORCE_SYNC: ${{ github.event.inputs.force_sync || 'false' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
