@@ -30,10 +30,13 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
       - name: Push schema to DB
+        # DIRECT_URL (port 5432, pooler'sız) GitHub Actions runner'larından ulaşılamıyor olabilir
+        # (Supabase bazı bölgelerde bu portu IPv6-only açıyor) — pooler bağlantısını (DATABASE_URL)
+        # DIRECT_URL yerine de kullanıyoruz, şema zaten senkronsa bu adım no-op olur
         run: npx prisma db push --skip-generate --accept-data-loss
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DATABASE_URL }}
       - name: Build TypeScript
         run: npm run build
       - name: Run sync
