@@ -238,13 +238,15 @@ export async function listSeasonFolders(
         corpora: "allDrives",
     });
 
-    const seasonRe = /^(\d{4})-(\d{4})$/;
+    // Klasör adları "2025-2026 Sezonu" gibi ekli olabiliyor, bu yüzden tam eşleşme yerine
+    // adın herhangi bir yerinde "YYYY-YYYY" arıyoruz.
+    const seasonRe = /(\d{4})-(\d{4})/;
     const seasons: { key: string; id: string; year: number }[] = [];
 
     for (const file of response.data.files ?? []) {
         const match = seasonRe.exec(file.name ?? "");
         if (!match) continue;
-        seasons.push({ key: file.name, id: file.id, year: parseInt(match[1], 10) });
+        seasons.push({ key: match[0], id: file.id, year: parseInt(match[1], 10) });
     }
 
     return seasons;
