@@ -4,6 +4,14 @@ import { MatchData } from "./lib/match-parser";
 import { DriveSpreadsheet } from "./lib/google-drive";
 import { logger } from "./logger";
 
+// İlk kurulum koruması: DB'de hiç parsedMatch yoksa bu, sistemin ilk çalışması demektir.
+// Bu durumda tüm atamalar "yeni" sayılacağından, binlerce yanlış bildirim gitmemesi için
+// çağıran taraf (index.ts) bildirim gönderimini tamamen atlamalı.
+export async function isFirstEverSync(): Promise<boolean> {
+    const count = await db.parsedMatch.count();
+    return count === 0;
+}
+
 export function computeMatchKey(match: MatchData): string {
     const hakemlerSorted = [...match.hakemler].sort().join("|");
     const masaSorted = [...match.masa_gorevlileri].sort().join("|");

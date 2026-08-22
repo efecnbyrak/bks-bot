@@ -8,13 +8,17 @@ import {
     acquireLock,
     releaseLock,
     detectAndMarkCancelledMatches,
-    createCancellationAnnouncements,
+    CancelledMatchInfo,
 } from "./db-writer";
-import { buildUserAssignments } from "./user-matcher";
-import { sendCancellationPush } from "./lib/push-sender";
+import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
 import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
+
+export interface RunSyncResult {
+    newAssignments: NewAssignmentInfo[];
+    cancellations: CancelledMatchInfo[];
+}
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -37,7 +41,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     throw new Error("Unreachable");
 }
 
-export async function runSync(folderKey: string): Promise<void> {
+export async function runSync(folderKey: string): Promise<RunSyncResult> {
+    const runResult: RunSyncResult = { newAssignments: [], cancellations: [] };
+
     // Verify DB is reachable before doing anything — throws on connection failure
     try {
         await db.$queryRaw`SELECT 1`;
@@ -63,14 +69,14 @@ export async function runSync(folderKey: string): Promise<void> {
                 elapsedMin: Math.round(elapsedMin * 10) / 10,
                 requiredMin: Math.round(requiredMin * 10) / 10,
             });
-            return;
+            return runResult;
         }
     }
 
     const locked = await acquireLock(folderKey);
     if (!locked) {
         logger.warn("Sync atlandı — klasör kilitli", { folderKey });
-        return;
+        return runResult;
     }
 
     let filesChecked = 0;
@@ -99,7 +105,7 @@ export async function runSync(folderKey: string): Promise<void> {
         if (files.length === 0) {
             logger.warn("Hiç dosya bulunamadı", { folderKey });
             success = true;
-            return;
+            return runResult;
         }
 
         // 2. Değişen dosyaları tespit et
@@ -109,7 +115,7 @@ export async function runSync(folderKey: string): Promise<void> {
         if (toProcess.length === 0) {
             logger.info("Değişen dosya yok — tamamlandı", { folderKey });
             success = true;
-            return;
+            return runResult;
         }
 
         // 3. Değişen dosyaları indir, parse et, DB'ye yaz
@@ -141,25 +147,16 @@ export async function runSync(folderKey: string): Promise<void> {
                 matchesUpserted += matchIds.length;
 
                 // Kullanıcı atamalarını oluştur
-                const assigned = await buildUserAssignments(matches, matchIds);
-                assignmentsBuilt += assigned;
+                const { assignmentCount, newAssignments } = await buildUserAssignments(matches, matchIds);
+                assignmentsBuilt += assignmentCount;
+                runResult.newAssignments.push(...newAssignments);
 
-                // İptal tespiti: bu dosyadaki atamalar kontrol edilir;
-                // arşive taşıma değil, hakem listesinden isim silinmesi iade sayılır
+                // İptal tespiti: bu dosyadaki atamalar kontrol edilir; arşive taşıma değil,
+                // hakem listesinden isim silinmesi iade sayılır. Bildirim burada GÖNDERİLMEZ —
+                // tüm klasörler (current + arşiv) işlendikten sonra index.ts'deki reconcileAndNotify
+                // adımında "iptal mi yoksa başka maça atanma mı" ayrımı yapılıp öyle gönderilir.
                 const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, matches);
-                if (cancelled.length > 0) {
-                    // İade bildirimleri: duyuru kaydı oluşturulur ve etkilenen kullanıcılara push atılır
-                    await createCancellationAnnouncements(cancelled);
-                    for (const c of cancelled) {
-                        if (c.affectedUserIds.length > 0) {
-                            await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
-                        }
-                    }
-                    logger.info("İptal bildirimi gönderildi", {
-                        cancelledCount: cancelled.length,
-                        affectedUsers: [...new Set(cancelled.flatMap(c => c.affectedUserIds))].length,
-                    });
-                }
+                runResult.cancellations.push(...cancelled);
 
             } catch (err: any) {
                 const errMsg = err?.message || "Bilinmeyen hata";
@@ -178,6 +175,7 @@ export async function runSync(folderKey: string): Promise<void> {
             folderKey, filesChecked, filesChanged, matchesUpserted, assignmentsBuilt,
             durationMs: Date.now() - startMs,
         });
+        return runResult;
 
     } catch (err: any) {
         const errMsg = err?.message || "Bilinmeyen hata";
@@ -199,4 +197,6 @@ export async function runSync(folderKey: string): Promise<void> {
             startedAt,
         });
     }
+
+    return runResult;
 }

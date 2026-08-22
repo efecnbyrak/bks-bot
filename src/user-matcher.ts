@@ -9,6 +9,13 @@ interface UserProfile {
     lastName: string;
 }
 
+export interface NewAssignmentInfo {
+    userId: number;
+    matchId: number;
+    macAdi: string;
+    tarih: string;
+}
+
 async function loadActiveUsers(): Promise<UserProfile[]> {
     const referees = await db.referee.findMany({
         where: { user: { isActive: true, isApproved: true } },
@@ -60,17 +67,31 @@ function detectRole(match: MatchData, personName: string): { role: string; nameI
 export async function buildUserAssignments(
     matches: MatchData[],
     matchIds: number[]
-): Promise<number> {
+): Promise<{ assignmentCount: number; newAssignments: NewAssignmentInfo[] }> {
     const users = await loadActiveUsers();
     logger.info("Kullanıcı yüklemesi tamamlandı", { count: users.length });
 
+    // Bu maçlar için önceden var olan (iptal edilmiş dahil) atamaları tek seferde çek —
+    // "insert mi update mi" ayrımını her satır için ayrı sorgu atmadan yapabilmek için.
+    const validMatchIds = matchIds.filter((id): id is number => !!id);
+    const existing = validMatchIds.length > 0
+        ? await db.userMatchAssignment.findMany({
+              where: { matchId: { in: validMatchIds } },
+              select: { userId: true, matchId: true },
+          })
+        : [];
+    const existingKeys = new Set(existing.map((e: { userId: number; matchId: number }) => `${e.userId}:${e.matchId}`));
+
     let assignmentCount = 0;
-    const pendingAssignments: { userId: number; matchId: number; role: string; nameInSpreadsheet: string }[] = [];
+    const pendingAssignments: { userId: number; matchId: number; role: string; nameInSpreadsheet: string; isNew: boolean }[] = [];
+    const matchById = new Map<number, MatchData>();
 
     for (let i = 0; i < matches.length; i++) {
         const match = matches[i];
         const matchId = matchIds[i];
         if (!matchId) continue;
+
+        matchById.set(matchId, match);
 
         const allPersonnel = [
             ...match.hakemler,
@@ -110,11 +131,13 @@ export async function buildUserAssignments(
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;
 
+            const isNew = !existingKeys.has(`${user.userId}:${matchId}`);
             pendingAssignments.push({
                 userId: user.userId,
                 matchId,
                 role: roleInfo.role,
                 nameInSpreadsheet: roleInfo.nameInSpreadsheet,
+                isNew,
             });
             assignmentCount++;
         }
@@ -140,6 +163,13 @@ export async function buildUserAssignments(
         ));
     }
 
-    logger.info("Atama oluşturma tamamlandı", { assignmentCount });
-    return assignmentCount;
+    const newAssignments: NewAssignmentInfo[] = pendingAssignments
+        .filter(a => a.isNew)
+        .map(a => {
+            const match = matchById.get(a.matchId)!;
+            return { userId: a.userId, matchId: a.matchId, macAdi: match.mac_adi, tarih: match.tarih };
+        });
+
+    logger.info("Atama oluşturma tamamlandı", { assignmentCount, newAssignmentCount: newAssignments.length });
+    return { assignmentCount, newAssignments };
 }

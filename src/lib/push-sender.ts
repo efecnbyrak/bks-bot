@@ -33,10 +33,13 @@ function getFirebaseApp(): App | null {
     }
 }
 
-export async function sendCancellationPush(
+async function sendPushToUsers(
     userIds: number[],
-    matchName: string,
-    matchDate: string
+    title: string,
+    body: string,
+    dataType: string,
+    logLabel: string,
+    extraData?: Record<string, string>
 ): Promise<void> {
     if (userIds.length === 0) return;
 
@@ -53,11 +56,9 @@ export async function sendCancellationPush(
         .filter((t: string) => typeof t === "string" && t.length > 0);
 
     if (tokens.length === 0) {
-        logger.info("İptal bildirimi: push token bulunamadı", { userIds });
+        logger.info(`${logLabel}: push token bulunamadı`, { userIds });
         return;
     }
-
-    const body = `${matchName} (${matchDate}) maçınız iptal edildi.`;
 
     for (let i = 0; i < tokens.length; i += CHUNK_SIZE) {
         const chunk = tokens.slice(i, i + CHUNK_SIZE);
@@ -65,11 +66,8 @@ export async function sendCancellationPush(
         try {
             const response = await getMessaging(app).sendEachForMulticast({
                 tokens: chunk,
-                notification: {
-                    title: "Maç İptal Edildi",
-                    body,
-                },
-                data: { type: "MATCH_CANCELLED" },
+                notification: { title, body },
+                data: { type: dataType, ...extraData },
                 android: {
                     notification: {
                         sound: "default",
@@ -104,9 +102,44 @@ export async function sendCancellationPush(
         }
     }
 
-    logger.info("İptal push bildirimleri gönderildi", {
+    logger.info(`${logLabel} gönderildi`, {
         userCount: userIds.length,
         tokenCount: tokens.length,
-        matchName,
     });
+}
+
+export async function sendCancellationPush(
+    userIds: number[],
+    matchName: string,
+    matchDate: string
+): Promise<void> {
+    const body = `${matchName} (${matchDate}) maçınız iptal edildi.`;
+    await sendPushToUsers(userIds, "Maç İptal Edildi", body, "MATCH_CANCELLED", "İptal bildirimi");
+}
+
+export async function sendAssignmentPush(
+    userId: number,
+    matchName: string,
+    matchDate: string
+): Promise<void> {
+    const body = `${matchName} (${matchDate}) maçına atandınız.`;
+    await sendPushToUsers([userId], "Yeni Maça Atandınız", body, "MATCH_ASSIGNED", "Atama bildirimi");
+}
+
+export async function sendMatchChangedPush(
+    userId: number,
+    oldMatchName: string,
+    oldMatchDate: string,
+    newMatchName: string,
+    newMatchDate: string
+): Promise<void> {
+    const body = `${oldMatchName} (${oldMatchDate}) yerine ${newMatchName} (${newMatchDate}) maçına atandınız.`;
+    await sendPushToUsers(
+        [userId],
+        "Maçınız Değişti",
+        body,
+        "MATCH_CHANGED",
+        "Değişiklik bildirimi",
+        { oldMatchName, newMatchName }
+    );
 }
