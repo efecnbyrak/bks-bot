@@ -42,6 +42,17 @@ export function getSyncMode(): "normal" | "archive-full" {
     return mode === "archive-full" ? "archive-full" : "normal";
 }
 
+// Sezon geçişi Ağustos'ta oluyor: Ağustos ve sonrasında "bu yıl - gelecek yıl",
+// öncesinde "geçen yıl - bu yıl" sezonundayız sayılır (örn. 2026-08-23 -> "2026-2027").
+const SEASON_START_MONTH = 8; // Ağustos (1-12)
+
+export function getCurrentSeasonKey(date: Date = new Date()): string {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const startYear = month >= SEASON_START_MONTH ? year : year - 1;
+    return `${startYear}-${startYear + 1}`;
+}
+
 // SYNC_FOLDER_KEY virgülle ayrılmış birden fazla anahtar içerebilir (örn. "current,2025-2026").
 // "current" DRIVE_FOLDERS'ta statik olarak tanımlı; sezon adı (örn. "2025-2026") verilirse
 // ARCHIVE_ROOT_ID altında o isimde bir klasör aranıp bulunursa DRIVE_FOLDERS'a kaydedilir.
@@ -60,8 +71,14 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
         if (key === "latest-season") {
             seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
             if (seasonCache.length === 0) throw new Error(`Arşiv kökünde (${ARCHIVE_ROOT_ID}) sezon klasörü bulunamadı.`);
-            const latest = seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
-            registerFolder("latest-season", { id: latest.id, maxDepth: 2 });
+
+            // Önce tarihe göre hesaplanan sezonu ara (örn. bugün Ağustos 2026 ise "2026-2027").
+            // Klasör henüz oluşturulmamışsa (federasyon geç açtıysa) Drive'daki en güncel yıla düş.
+            const expectedKey = getCurrentSeasonKey();
+            const exact = seasonCache.find(s => s.key === expectedKey);
+            const chosen = exact ?? seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
+
+            registerFolder("latest-season", { id: chosen.id, maxDepth: 2 });
             continue;
         }
         seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
