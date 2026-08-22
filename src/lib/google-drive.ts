@@ -223,7 +223,11 @@ export async function listSeasonFolders(
     archiveRootId: string
 ): Promise<{ key: string; id: string; year: number }[]> {
     const drive = await getDrive();
-    const { id: rootId } = parseDriveId(archiveRootId);
+    // archiveRootId düz bir ID olduğu için parseDriveId GOOGLE_DRIVE_RESOURCE_KEY fallback'ini
+    // devreye sokar — ama o fallback "current" klasörüne ait, arşiv köküne değil. Arşiv kökü
+    // resourceKey gerektirmiyorsa (mevcut kurulumda gerektirmiyor), yanlış header 403/boş sonuca
+    // yol açar, bu yüzden burada resourceKey bilerek kullanılmıyor.
+    const rootId = archiveRootId.split("?")[0];
 
     const response: any = await drive.files.list({
         q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -231,6 +235,7 @@ export async function listSeasonFolders(
         pageSize: 1000,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
+        corpora: "allDrives",
     });
 
     const seasonRe = /^(\d{4})-(\d{4})$/;

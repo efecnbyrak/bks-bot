@@ -59,7 +59,7 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
         if (DRIVE_FOLDERS[key]) continue;
         if (key === "latest-season") {
             seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
-            if (seasonCache.length === 0) throw new Error("Arşiv kökünde sezon klasörü bulunamadı.");
+            if (seasonCache.length === 0) throw new Error(`Arşiv kökünde (${ARCHIVE_ROOT_ID}) sezon klasörü bulunamadı.`);
             const latest = seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
             registerFolder("latest-season", { id: latest.id, maxDepth: 2 });
             continue;
