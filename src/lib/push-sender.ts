@@ -67,7 +67,9 @@ async function sendPushToUsers(
             const response = await getMessaging(app).sendEachForMulticast({
                 tokens: chunk,
                 notification: { title, body },
-                data: { type: dataType, ...extraData },
+                // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
+                // yönlendirme yapabilsin diye üç bildirim tipine de eklenen ortak alan.
+                data: { type: dataType, screen: "MATCHES", ...extraData },
                 android: {
                     notification: {
                         sound: "default",
