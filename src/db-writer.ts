@@ -268,6 +268,28 @@ export async function detectAndMarkCancelledMatches(
     // matchId → CancelledMatchInfo (birden fazla kullanıcı aynı maçta olabilir)
     const cancelledMap = new Map<number, CancelledMatchInfo>();
 
+    // Bu dosyada bulunamayan maçları iptal saymadan önce, başka bir dosyaya
+    // (örn. arşive) taşınıp taşınmadığını kontrol et — taşınmışsa gerçek iptal değildir.
+    const missingContentKeys = [
+        ...new Set(
+            existingAssignments
+                .map(a => a.match.contentKey)
+                .filter((ck): ck is string => !!ck && !currentContentKeys.has(ck))
+        ),
+    ];
+
+    const movedElsewhere = missingContentKeys.length > 0
+        ? await db.parsedMatch.findMany({
+              where: {
+                  contentKey: { in: missingContentKeys },
+                  cancelledAt: null,
+                  driveFileId: { not: driveFileDbId },
+              },
+              select: { contentKey: true },
+          })
+        : [];
+    const movedContentKeys = new Set(movedElsewhere.map((m: { contentKey: string | null }) => m.contentKey));
+
     for (const assignment of existingAssignments) {
         const match = assignment.match;
         const contentKey = match.contentKey;
@@ -275,8 +297,13 @@ export async function detectAndMarkCancelledMatches(
         // contentKey yoksa eski kayıt — matchKey ile kontrol et (geçiş dönemi güvencesi)
         if (!contentKey) continue;
 
+        if (movedContentKeys.has(contentKey)) {
+            // Maç başka bir dosyaya (örn. arşive) taşınmış — iptal değil, atlanır
+            continue;
+        }
+
         if (!currentContentKeys.has(contentKey)) {
-            // Maç bu dosyada artık yok (ve başka bir dosyaya da taşınmamış) → iade
+            // Maç bu dosyada artık yok ve başka hiçbir aktif dosyada da bulunamadı → gerçek iade
             if (!cancelledMap.has(match.id)) {
                 cancelledMap.set(match.id, {
                     matchId: match.id,
