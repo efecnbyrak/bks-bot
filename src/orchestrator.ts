@@ -51,12 +51,12 @@ export async function runSync(folderKey: string): Promise<void> {
     const startMs = Date.now();
     const errors: string[] = [];
 
-    // Jitter: son başarılı sync'ten beri [12,18) dk geçmediyse atla.
+    // Jitter: son başarılı sync'ten beri [5,10) dk geçmediyse atla.
     // FORCE_SYNC=true ise (elle tetikleme) jitter bypass edilir.
     const syncState = await db.workerSyncState.findUnique({ where: { folderKey } });
     if (syncState?.lastSuccessAt && !isForceSync()) {
         const elapsedMin = (Date.now() - syncState.lastSuccessAt.getTime()) / 60000;
-        const requiredMin = 12 + Math.random() * 6; // [12, 18)
+        const requiredMin = 5 + Math.random() * 5; // [5, 10)
         if (elapsedMin < requiredMin) {
             logger.info("Jitter: henüz erken — sync atlandı", {
                 folderKey,
@@ -148,14 +148,14 @@ export async function runSync(folderKey: string): Promise<void> {
                 // arşive taşıma değil, hakem listesinden isim silinmesi iade sayılır
                 const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, matches);
                 if (cancelled.length > 0) {
-                    // Şimdilik iade bildirimleri kapatıldı — açmak için aşağıdaki yorumları kaldır
-                    // await createCancellationAnnouncements(cancelled);
-                    // for (const c of cancelled) {
-                    //     if (c.affectedUserIds.length > 0) {
-                    //         await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
-                    //     }
-                    // }
-                    logger.info("İptal tespit edildi (bildirim kapalı)", {
+                    // İade bildirimleri: duyuru kaydı oluşturulur ve etkilenen kullanıcılara push atılır
+                    await createCancellationAnnouncements(cancelled);
+                    for (const c of cancelled) {
+                        if (c.affectedUserIds.length > 0) {
+                            await sendCancellationPush(c.affectedUserIds, c.macAdi, c.tarih);
+                        }
+                    }
+                    logger.info("İptal bildirimi gönderildi", {
                         cancelledCount: cancelled.length,
                         affectedUsers: [...new Set(cancelled.flatMap(c => c.affectedUserIds))].length,
                     });

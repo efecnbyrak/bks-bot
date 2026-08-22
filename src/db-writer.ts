@@ -188,7 +188,7 @@ export async function writeSyncLog(params: {
 
 export async function acquireLock(folderKey: string): Promise<boolean> {
     const now = new Date();
-    const lockExpiry = new Date(now.getTime() + 360 * 60 * 1000); // 6 saat
+    const lockExpiry = new Date(now.getTime() + 60 * 60 * 1000); // 1 saat
 
     const existing = await db.workerSyncState.findUnique({ where: { folderKey } });
 

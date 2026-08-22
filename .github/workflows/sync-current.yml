@@ -2,7 +2,7 @@ name: Sync Current Season
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       force_sync:
@@ -29,22 +29,16 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
-      - name: Push schema to DB
-        # DIRECT_URL (port 5432, pooler'sız) GitHub Actions runner'larından ulaşılamıyor olabilir
-        # (Supabase bazı bölgelerde bu portu IPv6-only açıyor) — pooler bağlantısını (DATABASE_URL)
-        # DIRECT_URL yerine de kullanıyoruz, şema zaten senkronsa bu adım no-op olur
-        run: npx prisma db push --skip-generate --accept-data-loss
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DATABASE_URL }}
       - name: Build TypeScript
         run: npm run build
       - name: Run sync
         run: node dist/index.js
         env:
-          # current dışında 2025-2026 arşivi de taranır — federasyon sezon geçişinde
-          # güncel maçları bazen hâlâ arşiv klasörüne ekleyebiliyor
-          SYNC_FOLDER_KEY: current,2025-2026
+          # current dışında en güncel sezon arşivi de otomatik taranır — federasyon sezon
+          # geçişinde güncel maçları bazen hâlâ arşiv klasörüne ekleyebiliyor. "latest-season"
+          # her çalıştırmada ARCHIVE_ROOT_ID altındaki en yeni "YYYY-YYYY" klasörünü bulur,
+          # böylece sezon değiştiğinde bu değerin elle güncellenmesine gerek kalmaz.
+          SYNC_FOLDER_KEY: current,latest-season
           SYNC_MODE: normal
           FORCE_SYNC: ${{ github.event.inputs.force_sync || 'false' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

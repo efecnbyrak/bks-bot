@@ -4,33 +4,24 @@ export interface FolderConfig {
     maxDepth: number;
 }
 
+// Ana arşiv klasörü — içinde "2025-2026", "2026-2027" gibi sezon adlı alt klasörler barındırır.
+// Geçmiş sezonlara elle erişmek için sync-archives-once.yml workflow'u kullanılır.
+export const ARCHIVE_ROOT_ID = "1wW7_ITBS2JWRHQqpBH1xq926070U2WQP";
+
 export const DRIVE_FOLDERS: Record<string, FolderConfig> = {
     current: {
         id: "0ByPao_qBUjN-YXJZSG5Fancybmc",
         resourceKey: "0-MKTgAd4XnpTp7S5flJBKuA",
         maxDepth: 0,
     },
-    "2025-2026": {
-        id: "1Tqtn2oN96UAyeARYtmYFGSfzkrSJOG9s",
-        maxDepth: 2,
-    },
-    "2024-2025": {
-        id: "12ugwc-i-fQEKbqfS-qbUtaYvz3ozTIsh",
-        maxDepth: 2,
-    },
-    "2023-2024": {
-        id: "1UyODoUB5Qsix6J-VqkD40OcmvFsBKTWm",
-        maxDepth: 2,
-    },
-    "2022-2023": {
-        id: "1h9aPtw5t_Q7WOyhx39LJAgMKbvixzI0k",
-        maxDepth: 2,
-    },
-    "2021-2022": {
-        id: "1-0-qvqZRfoVImZcgzHLgUwpAd35FaNZ4",
-        maxDepth: 2,
-    },
 };
+
+// findLatestSeasonFolder() ile tespit edilen güncel sezonu DRIVE_FOLDERS'a kaydeder,
+// böylece geri kalan kod (getFolderConfig, lock, sync log) folderKey'i normal bir
+// statik anahtarmış gibi kullanmaya devam edebilir.
+export function registerFolder(key: string, cfg: FolderConfig): void {
+    DRIVE_FOLDERS[key] = cfg;
+}
 
 export function getFolderConfig(key: string): FolderConfig {
     const cfg = DRIVE_FOLDERS[key];
@@ -51,15 +42,34 @@ export function getSyncMode(): "normal" | "archive-full" {
     return mode === "archive-full" ? "archive-full" : "normal";
 }
 
-// SYNC_FOLDER_KEY virgülle ayrılmış birden fazla anahtar içerebilir (örn. "current,2025-2026") —
-// federasyon sezon geçişinde güncel maçları bazen arşiv klasörüne de ekleyebiliyor
-export function getSyncFolderKeys(): string[] {
+// SYNC_FOLDER_KEY virgülle ayrılmış birden fazla anahtar içerebilir (örn. "current,2025-2026").
+// "current" DRIVE_FOLDERS'ta statik olarak tanımlı; sezon adı (örn. "2025-2026") verilirse
+// ARCHIVE_ROOT_ID altında o isimde bir klasör aranıp bulunursa DRIVE_FOLDERS'a kaydedilir.
+// Bu sayede federasyonun sezon geçişinde güncel maçları arşive de eklemesi durumu karşılanır
+// ve elle sync-archives-once.yml çalıştırıldığında geçmiş sezonlara da erişilebilir.
+export async function resolveSyncFolderKeys(): Promise<string[]> {
     const raw = process.env.SYNC_FOLDER_KEY;
     if (!raw) throw new Error("SYNC_FOLDER_KEY env var tanımlı değil.");
     const keys = raw.split(",").map(k => k.trim()).filter(Boolean);
+
+    const { listSeasonFolders } = await import("./lib/google-drive");
+    let seasonCache: { key: string; id: string; year: number }[] | null = null;
+
     for (const key of keys) {
-        if (!DRIVE_FOLDERS[key]) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}"`);
+        if (DRIVE_FOLDERS[key]) continue;
+        if (key === "latest-season") {
+            seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
+            if (seasonCache.length === 0) throw new Error("Arşiv kökünde sezon klasörü bulunamadı.");
+            const latest = seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
+            registerFolder("latest-season", { id: latest.id, maxDepth: 2 });
+            continue;
+        }
+        seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
+        const found = seasonCache.find(s => s.key === key);
+        if (!found) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}" (arşiv kökünde böyle bir sezon klasörü yok)`);
+        registerFolder(key, { id: found.id, maxDepth: 2 });
     }
+
     return keys;
 }
 

@@ -1,10 +1,10 @@
-import { getSyncFolderKeys } from "./config";
+import { resolveSyncFolderKeys } from "./config";
 import { runSync } from "./orchestrator";
 import { logger } from "./logger";
 import { db } from "./db";
 
 async function main() {
-    const folderKeys = getSyncFolderKeys();
+    const folderKeys = await resolveSyncFolderKeys();
 
     logger.info("bks-bot başlıyor", {
         folderKeys,

@@ -217,6 +217,48 @@ export async function findAllSpreadsheets(
 }
 
 /**
+ * Ana arşiv klasörü altındaki "YYYY-YYYY" adlı alt klasörleri listeler.
+ */
+export async function listSeasonFolders(
+    archiveRootId: string
+): Promise<{ key: string; id: string; year: number }[]> {
+    const drive = await getDrive();
+    const { id: rootId } = parseDriveId(archiveRootId);
+
+    const response: any = await drive.files.list({
+        q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: "files(id, name)",
+        pageSize: 1000,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+    });
+
+    const seasonRe = /^(\d{4})-(\d{4})$/;
+    const seasons: { key: string; id: string; year: number }[] = [];
+
+    for (const file of response.data.files ?? []) {
+        const match = seasonRe.exec(file.name ?? "");
+        if (!match) continue;
+        seasons.push({ key: file.name, id: file.id, year: parseInt(match[1], 10) });
+    }
+
+    return seasons;
+}
+
+/**
+ * Ana arşiv klasörü altındaki sezon klasörlerinden başlangıç yılına göre
+ * en güncel olanı döner (örn. "2026-2027" > "2025-2026").
+ */
+export async function findLatestSeasonFolder(
+    archiveRootId: string
+): Promise<{ key: string; id: string } | null> {
+    const seasons = await listSeasonFolders(archiveRootId);
+    if (seasons.length === 0) return null;
+    const latest = seasons.reduce((a, b) => (b.year > a.year ? b : a));
+    return { key: latest.key, id: latest.id };
+}
+
+/**
  * Download a spreadsheet as xlsx Buffer
  */
 export async function downloadAsXlsx(fileId: string, mimeType: string, resourceKey?: string): Promise<Buffer> {

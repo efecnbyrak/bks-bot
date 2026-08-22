@@ -4,15 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       folder_key:
-        description: 'Archive folder key'
+        description: 'Archive folder key (arşiv kökündeki klasör adıyla birebir aynı olmalı, örn. 2025-2026)'
         required: true
-        type: choice
-        options:
-          - '2025-2026'
-          - '2024-2025'
-          - '2023-2024'
-          - '2022-2023'
-          - '2021-2022'
+        default: '2025-2026'
+        type: string
       sync_mode:
         description: 'Sync mode'
         required: true
