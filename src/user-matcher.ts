@@ -11,12 +11,12 @@ interface UserProfile {
 
 async function loadActiveUsers(): Promise<UserProfile[]> {
     const referees = await db.referee.findMany({
-        where: { user: { isActive: true } },
+        where: { user: { isActive: true, isApproved: true } },
         select: { userId: true, firstName: true, lastName: true },
     });
 
     const officials = await db.generalOfficial.findMany({
-        where: { user: { isActive: true } },
+        where: { user: { isActive: true, isApproved: true } },
         select: { userId: true, firstName: true, lastName: true },
     });
 
@@ -83,6 +83,8 @@ export async function buildUserAssignments(
 
         if (allPersonnel.length === 0) continue;
 
+        const matchedPersonnel = new Set<string>();
+
         for (const user of users) {
             // Cache her kullanıcı için sıfırlanır — farklı kullanıcıların sonuçları karışmaz
             const nameCache = new Map<string, string | null>();
@@ -101,11 +103,9 @@ export async function buildUserAssignments(
                 }
             }
 
-            if (!matchedPerson) {
-                // production loglarında görünsün diye warn seviyesinde — isim formatı değişikliğini tespit etmek için
-                logger.warn("İsim eşleşmedi", { firstName: user.firstName, lastName: user.lastName, matchPersonnel: allPersonnel.slice(0, 5) });
-                continue;
-            }
+            if (!matchedPerson) continue;
+
+            matchedPersonnel.add(matchedPerson);
 
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;
@@ -117,6 +117,17 @@ export async function buildUserAssignments(
                 nameInSpreadsheet: roleInfo.nameInSpreadsheet,
             });
             assignmentCount++;
+        }
+
+        // Personel listesinde olup hiçbir kullanıcıyla eşleşmeyen isimler — isim formatı
+        // sorunlarını (Excel'deki yazım farklılıkları) tespit etmek için maç bazlı özet
+        const unmatched = allPersonnel.filter(p => !matchedPersonnel.has(p));
+        if (unmatched.length > 0) {
+            logger.debug("Personel isimleri eşleşmedi", {
+                matchName: match.mac_adi,
+                unmatchedCount: unmatched.length,
+                unmatchedNames: unmatched,
+            });
         }
     }
 
