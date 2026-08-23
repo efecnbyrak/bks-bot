@@ -34,7 +34,7 @@ async function loadActiveUsers(): Promise<UserProfile[]> {
     ];
 }
 
-function detectRole(match: MatchData, personName: string): { role: string; nameInSpreadsheet: string } | null {
+export function detectRole(match: MatchData, personName: string): { role: string; nameInSpreadsheet: string } | null {
     const check = (list: string[]): string | undefined => list.find(n => n === personName);
 
     let found = check(match.hakemler);

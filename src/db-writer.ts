@@ -28,7 +28,7 @@ export function computeContentKey(match: MatchData): string {
     return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
 }
 
-function parseTarihDate(tarih: string): Date | null {
+export function parseTarihDate(tarih: string): Date | null {
     if (!tarih) return null;
     const match = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
     if (!match) return null;
