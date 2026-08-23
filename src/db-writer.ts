@@ -196,7 +196,10 @@ export async function writeSyncLog(params: {
 
 export async function acquireLock(folderKey: string): Promise<boolean> {
     const now = new Date();
-    const lockExpiry = new Date(now.getTime() + 60 * 60 * 1000); // 1 saat
+    // GitHub Actions job timeout'u 10 dk (.github/workflows/sync-current.yml); force-kill
+    // durumunda releaseLock çalışmadan process ölebilir. TTL bu sürenin üzerinde tampon
+    // bırakacak şekilde 15 dk seçildi (eskiden 1 saatti — kilitli kalma penceresi çok uzundu).
+    const lockExpiry = new Date(now.getTime() + 15 * 60 * 1000); // 15 dk
 
     const existing = await db.workerSyncState.findUnique({ where: { folderKey } });
 
