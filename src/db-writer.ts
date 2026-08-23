@@ -236,6 +236,23 @@ export interface CancelledMatchInfo {
     affectedUserIds: number[];
 }
 
+function addToCancelledMap(
+    cancelledMap: Map<number, CancelledMatchInfo>,
+    match: { id: number; matchKey: string; macAdi: string; tarih: string },
+    userId: number
+): void {
+    if (!cancelledMap.has(match.id)) {
+        cancelledMap.set(match.id, {
+            matchId: match.id,
+            matchKey: match.matchKey,
+            macAdi: match.macAdi,
+            tarih: match.tarih,
+            affectedUserIds: [],
+        });
+    }
+    cancelledMap.get(match.id)!.affectedUserIds.push(userId);
+}
+
 export async function detectAndMarkCancelledMatches(
     driveFileDbId: number,
     currentMatches: MatchData[]
@@ -312,16 +329,7 @@ export async function detectAndMarkCancelledMatches(
 
         if (!currentContentKeys.has(contentKey)) {
             // Maç bu dosyada artık yok ve başka hiçbir aktif dosyada da bulunamadı → gerçek iade
-            if (!cancelledMap.has(match.id)) {
-                cancelledMap.set(match.id, {
-                    matchId: match.id,
-                    matchKey: match.matchKey,
-                    macAdi: match.macAdi,
-                    tarih: match.tarih,
-                    affectedUserIds: [],
-                });
-            }
-            cancelledMap.get(match.id)!.affectedUserIds.push(assignment.userId);
+            addToCancelledMap(cancelledMap, match, assignment.userId);
         } else {
             // Maç hâlâ tabloda var — ama bu kullanıcının ismi hakem listesinden silindi mi?
             const currentMatch = currentMatchByContentKey.get(contentKey)!;
@@ -338,16 +346,7 @@ export async function detectAndMarkCancelledMatches(
 
             if (!stillAssigned) {
                 // İsim silindi → iade
-                if (!cancelledMap.has(match.id)) {
-                    cancelledMap.set(match.id, {
-                        matchId: match.id,
-                        matchKey: match.matchKey,
-                        macAdi: match.macAdi,
-                        tarih: match.tarih,
-                        affectedUserIds: [],
-                    });
-                }
-                cancelledMap.get(match.id)!.affectedUserIds.push(assignment.userId);
+                addToCancelledMap(cancelledMap, match, assignment.userId);
             }
         }
     }
