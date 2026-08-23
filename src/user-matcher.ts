@@ -83,6 +83,8 @@ export async function buildUserAssignments(
     const existingKeys = new Set(existing.map((e: { userId: number; matchId: number }) => `${e.userId}:${e.matchId}`));
 
     let assignmentCount = 0;
+    let totalUnmatchedCount = 0;
+    let matchesWithUnmatchedCount = 0;
     const pendingAssignments: { userId: number; matchId: number; role: string; nameInSpreadsheet: string; isNew: boolean }[] = [];
     const matchById = new Map<number, MatchData>();
 
@@ -151,7 +153,19 @@ export async function buildUserAssignments(
                 unmatchedCount: unmatched.length,
                 unmatchedNames: unmatched,
             });
+            totalUnmatchedCount += unmatched.length;
+            matchesWithUnmatchedCount++;
         }
+    }
+
+    // LOG_LEVEL=info olan üretim ortamında yukarıdaki debug logları görünmüyor;
+    // isim eşleşmemesi sessizce kaybolan bildirimlere yol açabileceğinden
+    // info seviyesinde görünür bir özet bırakılıyor (detaylar için LOG_LEVEL=debug gerekir).
+    if (totalUnmatchedCount > 0) {
+        logger.info("Eşleşmeyen personel özeti", {
+            totalUnmatchedCount,
+            matchesWithUnmatchedCount,
+        });
     }
 
     // Pool limit (5) aşılmasın diye küçük batch — 200 paralel pool'u tüketiyordu
