@@ -1,12 +1,12 @@
 name: Sync Current Season
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
-  # GitHub'ın kendi schedule tetikleyicisi yoğunlukta gecikebiliyor/atlanabiliyor.
-  # cron-job.org gibi bir dış servisin 5 dk'da bir attığı POST isteğiyle bu event
-  # tetiklenerek daha güvenilir bir zamanlama sağlanıyor. schedule tetikleyicisi
-  # yedek olarak kalıyor.
+  # GitHub'ın kendi schedule tetikleyicisi yoğunlukta gecikebiliyor/atlanabiliyor
+  # (bilinen bir GitHub Actions davranışı). Bunun yerine cron-job.org'un 5 dk'da bir
+  # attığı POST isteğiyle bu event tetikleniyor — tek ve güvenilir zamanlama kaynağı.
+  # schedule tetikleyicisi bilinçli olarak KALDIRILDI: iki ayrı tetikleyicinin aynı
+  # anda çalışması, acquireLock'taki check-then-act (atomik olmayan) kilit deseninde
+  # teorik bir race window açıyordu — tek kaynağa indirerek bu risk tamamen kapatıldı.
   repository_dispatch:
     types: [external-cron]
   workflow_dispatch:
