@@ -3,6 +3,12 @@ name: Sync Current Season
 on:
   schedule:
     - cron: '*/5 * * * *'
+  # GitHub'ın kendi schedule tetikleyicisi yoğunlukta gecikebiliyor/atlanabiliyor.
+  # cron-job.org gibi bir dış servisin 5 dk'da bir attığı POST isteğiyle bu event
+  # tetiklenerek daha güvenilir bir zamanlama sağlanıyor. schedule tetikleyicisi
+  # yedek olarak kalıyor.
+  repository_dispatch:
+    types: [external-cron]
   workflow_dispatch:
     inputs:
       force_sync:
