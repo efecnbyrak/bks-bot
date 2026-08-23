@@ -241,13 +241,13 @@ export async function detectAndMarkCancelledMatches(
     currentMatches: MatchData[]
 ): Promise<CancelledMatchInfo[]> {
     // currentContentKeys: bu dosyada şu an hangi maçlar var (hakemlerden bağımsız kimlik)
-    const currentContentKeys = new Set(currentMatches.map(m => computeContentKey(m)));
-
     // contentKey → hakemler listesi eşlemesi (kimin ismi var diye bakmak için)
+    const currentContentKeys = new Set<string>();
     const currentMatchByContentKey = new Map<string, MatchData>();
     for (const m of currentMatches) {
-        currentContentKeys.add(computeContentKey(m));
-        currentMatchByContentKey.set(computeContentKey(m), m);
+        const contentKey = computeContentKey(m);
+        currentContentKeys.add(contentKey);
+        currentMatchByContentKey.set(contentKey, m);
     }
 
     // Bu dosyaya atanmış, henüz iptal edilmemiş kullanıcı atamalarını al
