@@ -388,6 +388,10 @@ model Question {
   questionType  String   @default("MULTIPLE_CHOICE")
   category      String?
   difficulty    String   @default("Orta")
+  // bks-web-system ile senkron — sonuç ekranındaki kural referansı chip'i için
+  ruleRefType    String?
+  ruleRefArticle String?
+  ruleRefSection String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -442,6 +446,18 @@ model UserAnswer {
   selectedAnswer String
   correctAnswer  String
   isCorrect      Boolean
+
+  // bks-web-system ile senkron — Sonuçlar sekmesi geçmiş snapshot'ları
+  questionType   String?
+  category       String?
+  optionA        String?
+  optionB        String?
+  optionC        String?
+  optionD        String?
+  explanation    String?  @db.Text
+  ruleRefType    String?
+  ruleRefArticle String?
+  ruleRefSection String?
 
   @@index([attemptId])
   @@map("user_answers")
