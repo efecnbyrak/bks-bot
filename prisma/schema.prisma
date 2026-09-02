@@ -63,11 +63,9 @@ model User {
   userMatchAssignments UserMatchAssignment[]
   pushTokens           PushToken[]
 
-  @@index([id])
   @@index([username])
   @@index([roleId])
   @@index([isActive])
-  @@index([isApproved])
   @@index([isApproved, isActive])
   @@map("users")
 }
@@ -204,6 +202,7 @@ model ParsedMatch {
   @@index([sezon])
   @@index([driveFileId])
   @@index([contentKey])
+  @@index([cancelledAt])
   @@map("parsed_matches")
 }
 
@@ -632,6 +631,7 @@ model AnnouncementRead {
   readAt         DateTime     @default(now())
 
   @@unique([announcementId, userId])
+  @@index([userId])
   @@map("announcement_reads")
 }
 
