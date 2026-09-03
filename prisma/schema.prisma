@@ -33,6 +33,10 @@ model User {
   suspendedUntil       DateTime?
   isActive             Boolean  @default(true)
   forceRefresh         Boolean  @default(false)
+  // bks-web-system Aşama 10 (oturum iptali) için eklendi. Bot bu alanı OKUMAZ/YAZMAZ;
+  // yalnızca şema senkronu için burada — bot'tan `prisma db push` atılırsa bilmediği
+  // bu kolonu düşürmesin diye. Şema push'ları HER ZAMAN bks-web-system'den yapılır.
+  sessionVersion       Int      @default(0)
   lastLoginAt          DateTime?
   pendingEmail         String?
   matchStore           Json?
