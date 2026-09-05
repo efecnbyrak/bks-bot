@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { db } from "../src/db";
 import { reconcileAndNotify } from "../src/change-notifier";
 import { NewAssignmentInfo } from "../src/user-matcher";
@@ -30,7 +31,13 @@ async function createTestMatchAndAssignment(userId: number, macAdi: string) {
     const match = await db.parsedMatch.create({
         data: {
             matchKey: `${TEST_MARKER}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            contentKey: `${TEST_MARKER}_content_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            // contentKey kolonu @db.VarChar(32) — worker'ın computeContentKey'i gibi
+            // sha256'nın ilk 32 karakteri kullanılır (aksi halde P2000 "value too long")
+            contentKey: crypto
+                .createHash("sha256")
+                .update(`${TEST_MARKER}|${macAdi}|${Date.now()}|${Math.random()}`)
+                .digest("hex")
+                .substring(0, 32),
             macAdi,
             tarih: new Date().toLocaleDateString("tr-TR"),
             kategori: "TEST",
