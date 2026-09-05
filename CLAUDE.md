@@ -30,6 +30,20 @@ birden fazla kez şema/davranış uyuşmazlığına yol açtı.
 - Yeni bir model bu repoya EKLENMEZ (bot sadece okuma/generate amaçlı) — yeni model ihtiyacı
   varsa önce `bks-web-system` şemasında tanımlanır, sonra buraya yansıtılır.
 
+## MD Dosyalarını Güncel Tutma Kuralı (ZORUNLU)
+
+Bir görev/değişiklik tamamlandıktan sonra bu repodaki ilgili `.md` dosyaları (bu
+CLAUDE.md dahil) **kontrol edilip güncel tutulmalı**. Bu kontrol tahmine değil,
+sistemden (kod, şema, git durumu) gerçekten okunan bilgiye dayanmalı:
+
+- Yapılan değişiklik CLAUDE.md'deki bir kuralı/varsayımı geçersiz kıldıysa veya
+  yeni bir kural gerektiriyorsa (örn. yeni bir şema senkron noktası, yeni bir
+  paylaşılan alan/model) — CLAUDE.md güncellenir.
+- Güncelleme öncesi dosyanın MEVCUT halini oku, üzerine kör yazma yapma —
+  mevcut format/üslup/madde işaretleme stiline uygun ekle.
+- Emin olunmayan bir bilgi asla md'ye yazılmaz; önce kod/şema/git okunarak
+  doğrulanır.
+
 ## Şema Senkron Checklist'i
 
 1. `bks-web-system/prisma/schema.prisma`'da bir değişiklik yapıldığını öğrendiğinde: bu
