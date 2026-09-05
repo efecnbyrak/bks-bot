@@ -3,7 +3,7 @@
 // Tüm modeller BKS prisma/schema.prisma ile senkronize tutulmalıdır.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -16,56 +16,51 @@ datasource db {
 // ─── Kullanıcı modelleri (yalnızca READ — Worker yazmaz) ───────────────────
 
 model User {
-  id                   Int      @id @default(autoincrement())
-  username             String   @unique
-  password             String
-  roleId               Int
-  role                 Role     @relation(fields: [roleId], references: [id])
-  imageUrl             String?
-  referee              Referee?
-  official             GeneralOfficial?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  verificationCode     String?
+  id                        Int                   @id @default(autoincrement())
+  username                  String                @unique
+  password                  String
+  roleId                    Int
+  role                      Role                  @relation(fields: [roleId], references: [id])
+  imageUrl                  String?
+  referee                   Referee?
+  official                  GeneralOfficial?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  verificationCode          String?
   verificationCodeExpiresAt DateTime?
-  isVerified           Boolean  @default(false)
-  isApproved           Boolean  @default(false)
-  suspendedUntil       DateTime?
-  isActive             Boolean  @default(true)
-  forceRefresh         Boolean  @default(false)
+  isVerified                Boolean               @default(false)
+  isApproved                Boolean               @default(false)
+  suspendedUntil            DateTime?
+  isActive                  Boolean               @default(true)
+  forceRefresh              Boolean               @default(false)
   // bks-web-system Aşama 10 (oturum iptali) için eklendi. Bot bu alanı OKUMAZ/YAZMAZ;
   // yalnızca şema senkronu için burada — bot'tan `prisma db push` atılırsa bilmediği
   // bu kolonu düşürmesin diye. Şema push'ları HER ZAMAN bks-web-system'den yapılır.
-  sessionVersion       Int      @default(0)
-  lastLoginAt          DateTime?
-  pendingEmail         String?
-  matchStore           Json?
-  matchRefreshQuota    Json?
-  resetPasswordCode    String?
-  resetPasswordExpiresAt DateTime?
-  recoveryCode         String?  @unique
-  videoProgress        VideoProgress[]
-  sectionVisits        SectionVisit[]
-  ruleProgress         RuleProgress[]
-  chats                ChatSession[]
-  securityQuestion     String?
-  securityAnswer       String?
-  mobileToken          String?  @unique
-  mobileTokenExpiry    DateTime?
-  mobileTokenApp       String?  @unique
-  mobileTokenAppExpiry DateTime?
-  passwordResetRequired Boolean @default(false)
-  auditLogs            AuditLog[]
-  announcements        Announcement[]
-  penalties            Penalty[]
-  sentMessages         UserMessage[] @relation("SentMessages")
-  receivedMessages     UserMessage[] @relation("ReceivedMessages")
-  observerReports      ObserverReport[]
-  supportTickets       SupportTicket[]
-  createdAssignments   ExamAssignment[]
-  announcementReads    AnnouncementRead[]
-  userMatchAssignments UserMatchAssignment[]
-  pushTokens           PushToken[]
+  sessionVersion            Int                   @default(0)
+  lastLoginAt               DateTime?
+  pendingEmail              String?
+  matchStore                Json?
+  matchRefreshQuota         Json?
+  resetPasswordCode         String?
+  resetPasswordExpiresAt    DateTime?
+  recoveryCode              String?               @unique
+  videoProgress             VideoProgress[]
+  sectionVisits             SectionVisit[]
+  ruleProgress              RuleProgress[]
+  securityQuestion          String?
+  securityAnswer            String?
+  mobileTokenApp            String?               @unique
+  mobileTokenAppExpiry      DateTime?
+  passwordResetRequired     Boolean               @default(false)
+  auditLogs                 AuditLog[]
+  announcements             Announcement[]
+  penalties                 Penalty[]
+  observerReports           ObserverReport[]
+  supportTickets            SupportTicket[]
+  createdAssignments        ExamAssignment[]
+  announcementReads         AnnouncementRead[]
+  userMatchAssignments      UserMatchAssignment[]
+  pushTokens                PushToken[]
 
   @@index([username])
   @@index([roleId])
@@ -75,12 +70,12 @@ model User {
 }
 
 model Referee {
-  id             Int      @id @default(autoincrement())
-  user           User     @relation(fields: [userId], references: [id])
-  userId         Int      @unique
+  id             Int                @id @default(autoincrement())
+  user           User               @relation(fields: [userId], references: [id])
+  userId         Int                @unique
   firstName      String
   lastName       String
-  email          String   @unique
+  email          String             @unique
   phone          String
   address        String?
   job            String?
@@ -88,13 +83,12 @@ model Referee {
   imageUrl       String?
   regions        Region[]
   forms          AvailabilityForm[]
-  assignments    MatchAssignment[]
   examAttempts   ExamAttempt[]
-  points         Int      @default(0)
-  rating         Int      @default(0)
+  points         Int                @default(0)
+  rating         Int                @default(0)
   iban           String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([userId])
   @@index([classification])
@@ -103,26 +97,25 @@ model Referee {
 }
 
 model GeneralOfficial {
-  id             Int      @id @default(autoincrement())
-  user           User     @relation(fields: [userId], references: [id])
-  userId         Int      @unique
-  firstName      String
-  lastName       String
-  email          String   @unique
-  phone          String
-  address        String?
-  job            String?
-  officialType   String
-  imageUrl       String?
-  regions        Region[]
-  forms          AvailabilityForm[]
-  assignments    MatchAssignment[]
-  points         Int      @default(0)
-  rating         Int      @default(0)
-  examAttempts   ExamAttempt[]
-  iban           String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           Int                @id @default(autoincrement())
+  user         User               @relation(fields: [userId], references: [id])
+  userId       Int                @unique
+  firstName    String
+  lastName     String
+  email        String             @unique
+  phone        String
+  address      String?
+  job          String?
+  officialType String
+  imageUrl     String?
+  regions      Region[]
+  forms        AvailabilityForm[]
+  points       Int                @default(0)
+  rating       Int                @default(0)
+  examAttempts ExamAttempt[]
+  iban         String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
   @@index([userId])
   @@index([officialType])
@@ -139,9 +132,9 @@ model Role {
 }
 
 model Region {
-  id       Int       @id @default(autoincrement())
-  name     String    @unique
-  referees Referee[]
+  id        Int               @id @default(autoincrement())
+  name      String            @unique
+  referees  Referee[]
   officials GeneralOfficial[]
 
   @@map("regions")
@@ -150,8 +143,8 @@ model Region {
 // ─── bks-bot worker tabloları (Worker YAZAR) ───────────────────────────────
 
 model DriveFile {
-  id               Int      @id @default(autoincrement())
-  driveFileId      String   @unique
+  id               Int       @id @default(autoincrement())
+  driveFileId      String    @unique
   driveFolderKey   String
   fileName         String
   mimeType         String
@@ -160,13 +153,13 @@ model DriveFile {
   modifiedTime     DateTime?
   lastProcessedAt  DateTime?
   lastProcessedMd5 String?
-  rowCount         Int      @default(0)
-  parseError       String?  @db.Text
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  rowCount         Int       @default(0)
+  parseError       String?   @db.Text
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  parsedMatches    ParsedMatch[]
+  parsedMatches ParsedMatch[]
 
   @@index([driveFolderKey])
   @@index([isActive, driveFolderKey])
@@ -227,16 +220,16 @@ model UserMatchAssignment {
 }
 
 model WorkerSyncLog {
-  id               Int      @id @default(autoincrement())
+  id               Int       @id @default(autoincrement())
   syncType         String
   folderKey        String
-  filesChecked     Int      @default(0)
-  filesChanged     Int      @default(0)
-  matchesUpserted  Int      @default(0)
-  assignmentsBuilt Int      @default(0)
-  durationMs       Int      @default(0)
+  filesChecked     Int       @default(0)
+  filesChanged     Int       @default(0)
+  matchesUpserted  Int       @default(0)
+  assignmentsBuilt Int       @default(0)
+  durationMs       Int       @default(0)
   errors           String[]
-  startedAt        DateTime @default(now())
+  startedAt        DateTime  @default(now())
   completedAt      DateTime?
 
   @@index([startedAt])
@@ -269,16 +262,16 @@ model PushToken {
 // ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────
 
 model Penalty {
-  id          Int      @id @default(autoincrement())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      Int
-  type        String
-  reason      String   @db.Text
-  startDate   DateTime @default(now())
-  endDate     DateTime?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int       @id @default(autoincrement())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  type      String
+  reason    String    @db.Text
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([userId])
   @@index([isActive, endDate])
@@ -301,16 +294,16 @@ model AuditLog {
 }
 
 model AvailabilityForm {
-  id            Int      @id @default(autoincrement())
-  referee       Referee? @relation(fields: [refereeId], references: [id])
+  id            Int               @id @default(autoincrement())
+  referee       Referee?          @relation(fields: [refereeId], references: [id])
   refereeId     Int?
-  official      GeneralOfficial? @relation(fields: [officialId], references: [id])
+  official      GeneralOfficial?  @relation(fields: [officialId], references: [id])
   officialId    Int?
   weekStartDate DateTime
-  status        String   @default("DRAFT")
+  status        String            @default("DRAFT")
   days          AvailabilityDay[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
   @@index([weekStartDate])
   @@index([refereeId])
@@ -319,101 +312,72 @@ model AvailabilityForm {
 }
 
 model AvailabilityDay {
-  id       Int              @id @default(autoincrement())
-  form     AvailabilityForm @relation(fields: [formId], references: [id], onDelete: Cascade)
-  formId   Int
-  date     DateTime
-  slots    String
+  id     Int              @id @default(autoincrement())
+  form   AvailabilityForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  formId Int
+  date   DateTime
+  slots  String
 
   @@index([formId])
   @@map("availability_days")
 }
 
 model SystemSetting {
-  key         String @id
+  key         String  @id
   value       String
   description String?
 
   @@map("system_settings")
 }
 
-model Match {
-  id          Int      @id @default(autoincrement())
-  matchCode   String   @unique
-  league      String
-  homeTeam    String
-  awayTeam    String
-  date        DateTime
-  location    String
-  assignments MatchAssignment[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([date])
-  @@index([matchCode])
-  @@map("matches")
-}
-
-model MatchAssignment {
-  id         Int      @id @default(autoincrement())
-  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  matchId    Int
-  referee    Referee? @relation(fields: [refereeId], references: [id], onDelete: Cascade)
-  refereeId  Int?
-  official   GeneralOfficial? @relation(fields: [officialId], references: [id], onDelete: Cascade)
-  officialId Int?
-  role       String
-
-  @@index([matchId])
-  @@index([refereeId])
-  @@index([officialId])
-  @@map("match_assignments")
-}
-
 model LoginAttempt {
-  id           Int      @id @default(autoincrement())
-  ipAddress    String   @unique
-  attempts     Int      @default(0)
-  lastAttempt  DateTime @default(now())
+  id           Int       @id @default(autoincrement())
+  ipAddress    String    @unique
+  attempts     Int       @default(0)
+  lastAttempt  DateTime  @default(now())
   blockedUntil DateTime?
 
   @@map("login_attempts")
 }
 
 model Question {
-  id            Int      @id @default(autoincrement())
-  questionText  String
-  optionA       String
-  optionB       String
-  optionC       String
-  optionD       String
-  correctAnswer String
-  questionType  String   @default("MULTIPLE_CHOICE")
-  category      String?
-  difficulty    String   @default("Orta")
+  id             Int      @id @default(autoincrement())
+  questionText   String
+  optionA        String
+  optionB        String
+  optionC        String
+  optionD        String
+  correctAnswer  String
+  questionType   String   @default("MULTIPLE_CHOICE")
+  category       String?
+  difficulty     String   @default("Kolay")
+  audience       String   @default("REFEREE") // "REFEREE" | "OFFICIAL" | "ALL" — sorunun hangi profil tipine gösterileceği
+  explanation    String?  @db.Text
+  externalId     String?  @unique
   // bks-web-system ile senkron — sonuç ekranındaki kural referansı chip'i için
   ruleRefType    String?
   ruleRefArticle String?
   ruleRefSection String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  @@index([audience, difficulty])
   @@map("questions")
 }
 
 model ExamAttempt {
-  id             Int      @id @default(autoincrement())
-  referee        Referee? @relation(fields: [refereeId], references: [id], onDelete: Cascade)
+  id             Int              @id @default(autoincrement())
+  referee        Referee?         @relation(fields: [refereeId], references: [id], onDelete: Cascade)
   refereeId      Int?
   official       GeneralOfficial? @relation(fields: [officialId], references: [id], onDelete: Cascade)
   officialId     Int?
   score          Int
-  totalQuestions Int      @default(20)
+  totalQuestions Int              @default(20)
   difficulty     String?
   answers        UserAnswer[]
-  assignment     ExamAssignment? @relation(fields: [assignmentId], references: [id])
+  assignment     ExamAssignment?  @relation(fields: [assignmentId], references: [id])
   assignmentId   Int?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime         @default(now())
 
   @@index([refereeId])
   @@index([officialId])
@@ -422,19 +386,19 @@ model ExamAttempt {
 }
 
 model ExamAssignment {
-  id               Int      @id @default(autoincrement())
+  id               Int           @id @default(autoincrement())
   title            String
   assignmentType   String
   targetGroups     String
   targetCategories String
-  questionCount    Int      @default(20)
+  questionCount    Int           @default(20)
   dueDate          DateTime?
-  isActive         Boolean  @default(true)
-  createdBy        User     @relation(fields: [createdById], references: [id])
+  isActive         Boolean       @default(true)
+  createdBy        User          @relation(fields: [createdById], references: [id])
   createdById      Int
   attempts         ExamAttempt[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([isActive])
   @@map("exam_assignments")
@@ -457,7 +421,7 @@ model UserAnswer {
   optionB        String?
   optionC        String?
   optionD        String?
-  explanation    String?  @db.Text
+  explanation    String? @db.Text
   ruleRefType    String?
   ruleRefArticle String?
   ruleRefSection String?
@@ -467,30 +431,30 @@ model UserAnswer {
 }
 
 model VideoCategory {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  description String?
-  displayOrder Int     @default(0)
-  videos      Video[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  name         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  videos       Video[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@map("video_categories")
 }
 
 model Video {
-  id              Int      @id @default(autoincrement())
+  id              Int             @id @default(autoincrement())
   title           String
   url             String
   description     String?
   category        String?
   duration        Int
-  viewCount       Int      @default(0)
-  videoCategory   VideoCategory? @relation(fields: [videoCategoryId], references: [id], onDelete: SetNull)
+  viewCount       Int             @default(0)
+  videoCategory   VideoCategory?  @relation(fields: [videoCategoryId], references: [id], onDelete: SetNull)
   videoCategoryId Int?
   progress        VideoProgress[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   @@index([videoCategoryId])
   @@map("videos")
@@ -511,105 +475,19 @@ model VideoProgress {
   @@map("video_progress")
 }
 
-model ChatSession {
-  id        String    @id @default(uuid())
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    Int
-  messages  Message[]
-  title     String?   @default("Yeni Sohbet")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  @@index([userId])
-  @@map("chat_sessions")
-}
-
-model Message {
-  id        String      @id @default(uuid())
-  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  sessionId String
-  role      String
-  content   String      @db.Text
-  createdAt DateTime    @default(now())
-
-  @@index([sessionId])
-  @@index([sessionId, createdAt])
-  @@map("messages")
-}
-
-model RuleBook {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  url         String?
-  content     String?  @db.Text
-  category    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@map("rule_books")
-}
-
-model ReffAIDocument {
-  id          Int      @id @default(autoincrement())
-  fileName    String
-  chunkIndex  Int
-  content     String   @db.Text
-  createdAt   DateTime @default(now())
-
-  @@index([fileName])
-  @@map("reffai_documents")
-}
-
-model PendingUpload {
-  id        String        @id @default(uuid())
-  filename  String
-  type      String
-  total     Int           @default(0)
-  chunks    UploadChunk[]
-  createdAt DateTime      @default(now())
-
-  @@map("pending_uploads")
-}
-
-model UploadChunk {
-  id              Int           @id @default(autoincrement())
-  pendingUpload   PendingUpload @relation(fields: [pendingUploadId], references: [id], onDelete: Cascade)
-  pendingUploadId String
-  index           Int
-  data            String        @db.Text
-
-  @@map("upload_chunks")
-}
-
 model Announcement {
-  id        Int      @id @default(autoincrement())
+  id        Int                @id @default(autoincrement())
   subject   String
-  content   String   @db.Text
-  target    String   @default("ALL")
-  sender    User?    @relation(fields: [senderId], references: [id])
+  content   String             @db.Text
+  target    String             @default("ALL")
+  sender    User?              @relation(fields: [senderId], references: [id])
   senderId  Int?
-  sentCount Int      @default(0)
-  createdAt DateTime @default(now())
+  sentCount Int                @default(0)
+  createdAt DateTime           @default(now())
   reads     AnnouncementRead[]
 
   @@index([target, createdAt])
   @@map("announcements")
-}
-
-model UserMessage {
-  id         Int      @id @default(autoincrement())
-  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
-  senderId   Int
-  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
-  receiverId Int
-  content    String   @db.Text
-  isRead     Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  @@index([senderId])
-  @@index([receiverId])
-  @@map("user_messages")
 }
 
 model ObserverReport {
@@ -695,20 +573,20 @@ model GameAssignment {
 }
 
 model SupportTicket {
-  id          Int      @id @default(autoincrement())
-  user        User?    @relation(fields: [userId], references: [id])
+  id          Int       @id @default(autoincrement())
+  user        User?     @relation(fields: [userId], references: [id])
   userId      Int?
   guestEmail  String?
-  type        String   @default("DESTEK")
+  type        String    @default("DESTEK")
   errorType   String
   subject     String
-  description String   @db.Text
-  imageUrls   String?  @db.Text
-  status      String   @default("OPEN")
-  adminNote   String?  @db.Text
+  description String    @db.Text
+  imageUrls   String?   @db.Text
+  status      String    @default("OPEN")
+  adminNote   String?   @db.Text
   replySeenAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId])
   @@index([status])
