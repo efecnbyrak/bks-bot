@@ -58,9 +58,39 @@ sistemden (kod, şema, git durumu) gerçekten okunan bilgiye dayanmalı:
 3. Push bildirim payload şekli (`type`, `screen`, `channel`, `data` alanları — bkz.
    `src/lib/push-sender.ts`) değiştiğinde, hem `bks-web-system` hem mobil tarafı
    (`bks-mobile-flutter/lib/services/push_notification_service.dart`, `badge_service.dart`)
-   aynı değişiklik döngüsünde gözden geçirilmeli.
+   aynı değişiklik döngüsünde gözden geçirilmeli. Mevcut maç bildirim tipleri:
+   `MATCH_ASSIGNED`, `MATCH_CHANGED`, `MATCH_CANCELLED`, `MATCH_UPDATED` (hepsi
+   `screen: "MATCHES"`). Yeni bir tip eklenirse `badge_service.dart` `bumpFromPushType`
+   switch'ine de eklenmeli.
 4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
    yana açılıp model/alan/index listesi karşılaştırılmalı.
+
+## Bildirim Kararı — İptal / Güncelleme / Yeni Atama (ZORUNLU)
+
+Federasyon Excel'de kadroyu **kademeli** dolduruyor (önce masa → sonra gözlemci → ... →
+en son hakemler). `matchKey` personel içerdiği için her adım yeni bir `ParsedMatch` satırı
+açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
+
+- **İptal/güncelleme kararı asla tek bir satıra bakılarak verilmez.** Bir kullanıcının
+  maçtan çıkıp çıkmadığı, o `contentKey`'in **tüm aktif satırlarının** kadrosuna bakılarak
+  belirlenir (`decideAssignmentOutcomes`, saf fonksiyon, `src/db-writer.ts`). Kullanıcı
+  kanonik (kadrosu en dolu) satırda varsa maçtadır; eski satırdaki ataması kanonik satıra
+  taşınır (`ROW_SHIFTED`), boşalan satır `cancelReason: "Kadro güncellendi"` ile iptal edilir.
+- İsim karşılaştırması **her iki yönde de** `nameMatches()` (fuzzy, sıra-bağımsız) kullanır —
+  atama tarafıyla (`user-matcher.ts`) simetrik olmalı. Ham `trim().toLowerCase()` eşitliği
+  tek başına yeterli değildir (Excel'de isim sırası tutarsız).
+- "Yeni atama mı" kararı `userId:matchId` değil **`userId:contentKey`** bazlıdır.
+- `detectAndMarkCancelledMatches` → `CancellationScanResult { cancelled, shifted }` döner.
+  `reconcileAndNotify` bunları + `newAssignments`'i alıp `planNotifications` (saf fonksiyon)
+  ile kullanıcı bazında tek bir bildirim tipi seçer: `UPDATED` / `CHANGED` / `CANCELLED` / `ASSIGNED`.
+- **`NOTIFY_DRY_RUN=1`**: FAZ 2 kararları (atama taşıma, satır iptali, push gönderimi)
+  uygulanmaz, sadece loglanır. `upsertParsedMatches` / `buildUserAssignments` normal çalışır.
+  `sync-current.yml` `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir
+  (cron turları etkilenmez).
+- **`evaluateCancellationSafety` sigortası**: bir dosyada iptal adayı ≥25 atama VE dosyanın
+  aktif atamalarının >%40'ıysa (başlık bozulması / kolon kayması şüphesi) hiçbir iptal
+  yazılmaz, `logger.error` ile loglanır. Eşiği düşürmeden önce günlük normal iade hacmini
+  (5-24 atama) kontrol et.
 
 ## Git Push Kuralları
 
