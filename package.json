@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "BKS Google Drive sync worker — GitHub Actions ile çalışır, Neon DB'ye yazar",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -19,7 +22,7 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "prisma": "^6.19.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
