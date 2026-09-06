@@ -17,6 +17,12 @@ on:
         default: 'false'
         type: choice
         options: ['false', 'true']
+      dry_run:
+        description: 'Bildirim/DB yazma yapma, sadece ne yapacağını logla (NOTIFY_DRY_RUN)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
   sync:
@@ -47,6 +53,8 @@ jobs:
           SYNC_FOLDER_KEY: current,latest-season
           SYNC_MODE: normal
           FORCE_SYNC: ${{ github.event.inputs.force_sync || 'false' }}
+          # '1' ise: atama taşıma, satır iptali ve push GÖNDERİMİ yapılmaz — sadece loglanır.
+          NOTIFY_DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

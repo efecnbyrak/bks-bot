@@ -145,3 +145,23 @@ export async function sendMatchChangedPush(
         { oldMatchName, newMatchName }
     );
 }
+
+// FAZ 3 — Kullanıcı maçta KALDI ama kadro/görevli listesi değişti (federasyon kademeli
+// doldurdu ya da bir görevliyi değiştirdi). "Yeni maça atandınız" YANLIŞ olurdu — bunun
+// yerine kısa bir "güncellendi" bildirimi. screen/channel diğer maç bildirimleriyle aynı,
+// mobil tarafta ek bir yönlendirme kuralı gerekmez.
+export async function sendMatchUpdatedPush(
+    userId: number,
+    matchName: string,
+    matchDate: string,
+    changeSummary: string
+): Promise<void> {
+    const body = `${matchName} (${matchDate}) — ${changeSummary}`;
+    await sendPushToUsers(
+        [userId],
+        "Maçınız Güncellendi",
+        body,
+        "MATCH_UPDATED",
+        "Güncelleme bildirimi"
+    );
+}

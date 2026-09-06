@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { computeMatchKey, computeContentKey, parseTarihDate } from "../src/db-writer";
+import { computeMatchKey, computeContentKey, parseTarihDate, evaluateCancellationSafety } from "../src/db-writer";
 import { MatchData } from "../src/lib/match-parser";
 
 function makeMatch(overrides: Partial<MatchData> = {}): MatchData {
@@ -65,6 +65,38 @@ describe("computeContentKey", () => {
         const a = makeMatch({ tarih: "23.08.2026" });
         const b = makeMatch({ tarih: "24.08.2026" });
         assert.notEqual(computeContentKey(a), computeContentKey(b));
+    });
+});
+
+describe("evaluateCancellationSafety (FAZ 1 sigortası)", () => {
+    test("normal günlük iade hacmi (24 atama / 60 aktif) güvenli sayılır", () => {
+        assert.equal(evaluateCancellationSafety(24, 60).safe, true);
+    });
+
+    test("mutlak eşiğin altındaki her şey oran ne olursa olsun güvenli (10 / 10)", () => {
+        assert.equal(evaluateCancellationSafety(10, 10).safe, true);
+    });
+
+    test("mutlak eşik aşıldı ama oran düşük (25 / 100) → güvenli", () => {
+        assert.equal(evaluateCancellationSafety(25, 100).safe, true);
+    });
+
+    test("hem mutlak hem oran eşiği aşıldı (25 / 60, %42) → engellenir", () => {
+        const r = evaluateCancellationSafety(25, 60);
+        assert.equal(r.safe, false);
+        assert.ok(r.reason);
+    });
+
+    test("parser regresyonu senaryosu (300 / 310, ~%97) → engellenir", () => {
+        assert.equal(evaluateCancellationSafety(300, 310).safe, false);
+    });
+
+    test("dosyada aktif atama görünmüyor ama aday çok (30 / 0) → engellenir", () => {
+        assert.equal(evaluateCancellationSafety(30, 0).safe, false);
+    });
+
+    test("kanıtlanmış 227821 vakası (6 atama) → sigorta bloklamaz, Faz 2'ye kalır", () => {
+        assert.equal(evaluateCancellationSafety(6, 40).safe, true);
     });
 });
 

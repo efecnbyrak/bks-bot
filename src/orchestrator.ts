@@ -9,6 +9,7 @@ import {
     releaseLock,
     detectAndMarkCancelledMatches,
     CancelledMatchInfo,
+    ShiftedAssignmentInfo,
 } from "./db-writer";
 import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
 import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync } from "./config";
@@ -18,6 +19,7 @@ import { db } from "./db";
 export interface RunSyncResult {
     newAssignments: NewAssignmentInfo[];
     cancellations: CancelledMatchInfo[];
+    shifted: ShiftedAssignmentInfo[];
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
@@ -42,7 +44,7 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 }
 
 export async function runSync(folderKey: string): Promise<RunSyncResult> {
-    const runResult: RunSyncResult = { newAssignments: [], cancellations: [] };
+    const runResult: RunSyncResult = { newAssignments: [], cancellations: [], shifted: [] };
 
     // Verify DB is reachable before doing anything — throws on connection failure
     try {
@@ -154,9 +156,10 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
                 // İptal tespiti: bu dosyadaki atamalar kontrol edilir; arşive taşıma değil,
                 // hakem listesinden isim silinmesi iade sayılır. Bildirim burada GÖNDERİLMEZ —
                 // tüm klasörler (current + arşiv) işlendikten sonra index.ts'deki reconcileAndNotify
-                // adımında "iptal mi yoksa başka maça atanma mı" ayrımı yapılıp öyle gönderilir.
-                const cancelled = await detectAndMarkCancelledMatches(driveFileDbId, matches);
-                runResult.cancellations.push(...cancelled);
+                // adımında "iptal mi, güncelleme mi, başka maça atanma mı" ayrımı yapılıp öyle gönderilir.
+                const scan = await detectAndMarkCancelledMatches(driveFileDbId, matches);
+                runResult.cancellations.push(...scan.cancelled);
+                runResult.shifted.push(...scan.shifted);
 
             } catch (err: any) {
                 const errMsg = err?.message || "Bilinmeyen hata";

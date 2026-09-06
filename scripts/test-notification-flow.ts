@@ -3,6 +3,19 @@ import { db } from "../src/db";
 import { reconcileAndNotify } from "../src/change-notifier";
 import { NewAssignmentInfo } from "../src/user-matcher";
 import { CancelledMatchInfo } from "../src/db-writer";
+import { MatchData } from "../src/lib/match-parser";
+
+// Test için minimal bir MatchData iskeleti — sadece NewAssignmentInfo.matchData
+// alanını doldurmak için kullanılıyor (kadro özeti üretimi bu senaryoda önemli değil).
+function stubMatchData(macAdi: string, tarih: string): MatchData {
+    return {
+        mac_adi: macAdi, tarih, saat: undefined, salon: undefined,
+        kategori: "TEST", ligTuru: "TEST",
+        hakemler: ["TEST KULLANICI"], masa_gorevlileri: [], saglikcilar: [],
+        istatistikciler: [], gozlemciler: [], sahaKomiserleri: [],
+        kaynak_dosya: TEST_MARKER,
+    };
+}
 
 // Uçtan uca bildirim testi — GERÇEK push token'a GERÇEK bildirim gönderir.
 // Kullanım:
@@ -69,7 +82,10 @@ async function assign(userId: number) {
     const match = await createTestMatchAndAssignment(userId, "TEST A vs TEST B");
 
     const newAssignments: NewAssignmentInfo[] = [
-        { userId, matchId: match.id, macAdi: match.macAdi, tarih: match.tarih },
+        {
+            userId, matchId: match.id, macAdi: match.macAdi, tarih: match.tarih,
+            contentKey: match.contentKey, matchData: stubMatchData(match.macAdi, match.tarih),
+        },
     ];
 
     console.log(`Test maçı oluşturuldu: matchId=${match.id}`);
@@ -102,10 +118,16 @@ async function change(userId: number) {
     const newMatch = await createTestMatchAndAssignment(userId, "TEST G vs TEST H");
 
     const cancellations: CancelledMatchInfo[] = [
-        { matchId: oldMatch.id, matchKey: oldMatch.matchKey, macAdi: oldMatch.macAdi, tarih: oldMatch.tarih, affectedUserIds: [userId] },
+        {
+            matchId: oldMatch.id, matchKey: oldMatch.matchKey, macAdi: oldMatch.macAdi,
+            tarih: oldMatch.tarih, affectedUserIds: [userId], contentKey: oldMatch.contentKey,
+        },
     ];
     const newAssignments: NewAssignmentInfo[] = [
-        { userId, matchId: newMatch.id, macAdi: newMatch.macAdi, tarih: newMatch.tarih },
+        {
+            userId, matchId: newMatch.id, macAdi: newMatch.macAdi, tarih: newMatch.tarih,
+            contentKey: newMatch.contentKey, matchData: stubMatchData(newMatch.macAdi, newMatch.tarih),
+        },
     ];
 
     console.log(`Eski maç iptal edildi: matchId=${oldMatch.id} (${oldMatch.macAdi})`);
@@ -132,7 +154,10 @@ async function cancel(userId: number) {
     });
 
     const cancellations: CancelledMatchInfo[] = [
-        { matchId: match.id, matchKey: match.matchKey, macAdi: match.macAdi, tarih: match.tarih, affectedUserIds: [userId] },
+        {
+            matchId: match.id, matchKey: match.matchKey, macAdi: match.macAdi,
+            tarih: match.tarih, affectedUserIds: [userId], contentKey: match.contentKey,
+        },
     ];
 
     console.log(`Test maçı iptal edildi: matchId=${match.id}`);

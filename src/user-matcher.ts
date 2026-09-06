@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { nameMatches, MatchData } from "./lib/match-parser";
-import { upsertUserMatchAssignment } from "./db-writer";
+import { upsertUserMatchAssignment, computeContentKey } from "./db-writer";
 import { logger } from "./logger";
 
 interface UserProfile {
@@ -14,6 +14,10 @@ export interface NewAssignmentInfo {
     matchId: number;
     macAdi: string;
     tarih: string;
+    // FAZ 2 — reconcileAndNotify'ın iptalle eşleştirmede "aynı maç mı" ayrımı için.
+    contentKey: string | null;
+    // Kadro değişikliği özeti üretmek için (ROW_SHIFTED → "Maçınız Güncellendi").
+    matchData: MatchData;
 }
 
 async function loadActiveUsers(): Promise<UserProfile[]> {
@@ -71,16 +75,32 @@ export async function buildUserAssignments(
     const users = await loadActiveUsers();
     logger.info("Kullanıcı yüklemesi tamamlandı", { count: users.length });
 
-    // Bu maçlar için önceden var olan (iptal edilmiş dahil) atamaları tek seferde çek —
-    // "insert mi update mi" ayrımını her satır için ayrı sorgu atmadan yapabilmek için.
+    // Bu maçların contentKey'lerini çıkar — "yeni atama mı" kararı contentKey bazlı verilir.
+    // Federasyon kadroyu kademeli doldurunca her adımda YENİ bir ParsedMatch satırı (yeni
+    // matchId) oluşuyor. Eski mantık `userId:matchId` baktığı için maçta zaten olan herkese
+    // "yeni maça atandınız" bildirimi gidiyordu. contentKey aynı kaldığı için `userId:contentKey`
+    // bakınca bu sahte "yeni atama" ortadan kalkar.
     const validMatchIds = matchIds.filter((id): id is number => !!id);
-    const existing = validMatchIds.length > 0
+    const contentKeyByMatchId = new Map<number, string>();
+    for (let i = 0; i < matches.length; i++) {
+        const mid = matchIds[i];
+        if (mid) contentKeyByMatchId.set(mid, computeContentKey(matches[i]));
+    }
+    const touchedContentKeys = [...new Set(contentKeyByMatchId.values())];
+
+    // Bu contentKey'lere ait HERHANGİ bir satırda (iptal edilmiş dahil) önceden atama var mı?
+    const existing = touchedContentKeys.length > 0
         ? await db.userMatchAssignment.findMany({
-              where: { matchId: { in: validMatchIds } },
-              select: { userId: true, matchId: true },
+              where: { match: { contentKey: { in: touchedContentKeys } } },
+              select: { userId: true, match: { select: { contentKey: true } } },
           })
         : [];
-    const existingKeys = new Set(existing.map((e: { userId: number; matchId: number }) => `${e.userId}:${e.matchId}`));
+    const existingKeys = new Set(
+        existing
+            .map((e: { userId: number; match: { contentKey: string | null } }) =>
+                e.match.contentKey ? `${e.userId}:${e.match.contentKey}` : null)
+            .filter((k): k is string => !!k)
+    );
 
     let assignmentCount = 0;
     let totalUnmatchedCount = 0;
@@ -133,7 +153,8 @@ export async function buildUserAssignments(
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;
 
-            const isNew = !existingKeys.has(`${user.userId}:${matchId}`);
+            const ck = contentKeyByMatchId.get(matchId);
+            const isNew = ck ? !existingKeys.has(`${user.userId}:${ck}`) : true;
             pendingAssignments.push({
                 userId: user.userId,
                 matchId,
@@ -181,7 +202,14 @@ export async function buildUserAssignments(
         .filter(a => a.isNew)
         .map(a => {
             const match = matchById.get(a.matchId)!;
-            return { userId: a.userId, matchId: a.matchId, macAdi: match.mac_adi, tarih: match.tarih };
+            return {
+                userId: a.userId,
+                matchId: a.matchId,
+                macAdi: match.mac_adi,
+                tarih: match.tarih,
+                contentKey: contentKeyByMatchId.get(a.matchId) ?? null,
+                matchData: match,
+            };
         });
 
     logger.info("Atama oluşturma tamamlandı", { assignmentCount, newAssignmentCount: newAssignments.length });
