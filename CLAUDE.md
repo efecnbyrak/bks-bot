@@ -30,15 +30,25 @@ birden fazla kez şema/davranış uyuşmazlığına yol açtı.
 - Yeni bir model bu repoya EKLENMEZ (bot sadece okuma/generate amaçlı) — yeni model ihtiyacı
   varsa önce `bks-web-system` şemasında tanımlanır, sonra buraya yansıtılır.
 
+## Dokümantasyon Nerede
+
+> Bu repoda **sadece bu `CLAUDE.md` var.** Bot'a ait ayrıntılı dokümanlar (çıkarsa)
+> merkezi olarak `bks-web-system` reposunda tutulur:
+> `E:\Yazilim\BKS\bks-web-system\docs\bot\`
+>
+> Yeni bir bot dokümanı gerektiğinde oraya eklenir, bu repoya yeni `.md` konmaz.
+> (Sebep: kullanıcı 3 projeyi de `bks-web-system` üzerinden yönetiyor.)
+
 ## MD Dosyalarını Güncel Tutma Kuralı (ZORUNLU)
 
-Bir görev/değişiklik tamamlandıktan sonra bu repodaki ilgili `.md` dosyaları (bu
-CLAUDE.md dahil) **kontrol edilip güncel tutulmalı**. Bu kontrol tahmine değil,
-sistemden (kod, şema, git durumu) gerçekten okunan bilgiye dayanmalı:
+Bir görev/değişiklik tamamlandıktan sonra ilgili `.md` dosyaları **kontrol edilip
+güncel tutulmalı**. Bu kontrol tahmine değil, sistemden (kod, şema, git durumu)
+gerçekten okunan bilgiye dayanmalı:
 
-- Yapılan değişiklik CLAUDE.md'deki bir kuralı/varsayımı geçersiz kıldıysa veya
+- Yapılan değişiklik bu CLAUDE.md'deki bir kuralı/varsayımı geçersiz kıldıysa veya
   yeni bir kural gerektiriyorsa (örn. yeni bir şema senkron noktası, yeni bir
   paylaşılan alan/model) — CLAUDE.md güncellenir.
+- Ayrıntılı bot dokümanı gerekiyorsa `bks-web-system\docs\bot\` altına eklenir.
 - Güncelleme öncesi dosyanın MEVCUT halini oku, üzerine kör yazma yapma —
   mevcut format/üslup/madde işaretleme stiline uygun ekle.
 - Emin olunmayan bir bilgi asla md'ye yazılmaz; önce kod/şema/git okunarak
@@ -91,6 +101,42 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   aktif atamalarının >%40'ıysa (başlık bozulması / kolon kayması şüphesi) hiçbir iptal
   yazılmaz, `logger.error` ile loglanır. Eşiği düşürmeden önce günlük normal iade hacmini
   (5-24 atama) kontrol et.
+- **reconcile (`detectAndMarkCancelledMatches`) sadece `filesChanged` olan dosyalarda çalışır**
+  (`src/orchestrator.ts` → `toProcess` döngüsü, dosya-bazlı). Bir Drive dosyası kadrosu
+  netleştikten sonra bir daha hiç değişmezse (donmuş dosya), o dosyanın kademeli-doldurma
+  ikizleri (aynı contentKey, birden fazla aktif satır) reconcile tarafından birleştirilmez.
+- **B6 ÇÖZÜMÜ (2026-09-09) — her sync sonunda periyodik konsolidasyon.** `src/index.ts`,
+  `reconcileAndNotify`'dan SONRA `consolidateActiveContentKeyDuplicates()`
+  (`src/lib/contentkey-consolidator.ts`) çağırır: tüm DB'yi tarar, aynı contentKey'e sahip
+  >1 aktif satır olan grupları GÜVENLİ birleştirir (kanonik = en dolu kadro; atama
+  kanoniğe taşınır / kardeşte varsa silinir; **belirsiz "gerçek çıkarılma" atamalarına
+  DOKUNMAZ**). BİLDİRİM ÜRETMEZ. İlk kurulumda (`isFirstEverSync`) atlanır. Hata sync'i
+  başarısız saymaz. `NOTIFY_DRY_RUN=1` ile DB'ye yazmadan çalışır. Bu, donmuş dosya
+  ikizlerinin birikmesini kalıcı olarak engeller — web `dedupeMatchesByContent`
+  (`bks-web-system/lib/matches/match-utils.ts`) ikinci savunma katmanı olarak kalır.
+  Elle çalıştırma / bir kerelik "gerçek çıkarılma" temizliği için CLI:
+  `scripts/consolidate-active-contentkey-duplicates.ts` (report / apply / apply-with-removals).
+
+## Bakım / Onarım Script'leri (`scripts/`)
+
+Tek seferlik DB düzeltme script'leri. **HEPSİ** aynı güvenlik disiplinine uyar: sadece
+`user_match_assignments` (matchId update / delete) + boşalan `parsed_matches` satırına
+`cancelledAt`/`cancelReason`; kanonik satıra, uygunluk/profil/duyuru tablolarına DOKUNMAZ;
+`userId_matchId` unique guard çift atama üretmeyi imkânsız kılar; her `apply` geri alma
+logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `apply`.
+
+| Script | Hedef | cancelReason |
+|---|---|---|
+| `repair-false-cancellations.ts` | A1 — `cancelledAt` DOLU eski satır + aktif kardeş (kademeli doldurma sahte iptali) | `Hakem listesinden çıkarıldı` (korunur) |
+| `detect-key-mismatch-duplicates.ts` | Salt okuma — isim/tarih değişimi kaynaklı farklı-contentKey ikizi | — |
+| `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
+| `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
+| `repair-salon-rename-duplicates.ts` | Salon adı varyasyonu (`PAIRS` dizisinde elle enumerate edilmiş çiftler) | `Salon adı varyasyonu — mükerrer stale kayıt temizliği` |
+
+Yeni bir mükerrer deseni çıkarsa: önce hangi alanın `contentKey`'i değiştirdiğini tespit et
+(mac_adi / tarih / saat / salon), sonra ilgili script'i genişlet veya yeni bir hedefli
+script yaz — **genel bir "slot bazlı hepsini birleştir" yaklaşımından kaçın** (aynı salonda
+peş peşe maç yöneten ekipler yüksek kadro örtüşmesi üretir, yanlış pozitif riski yüksek).
 
 ## Git Push Kuralları
 

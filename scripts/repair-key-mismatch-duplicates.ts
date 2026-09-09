@@ -23,12 +23,22 @@ import { nameMatches } from "../src/lib/match-parser";
  * `cancelReason`'a dokunur. Uygunluk formu / kullanıcı profili / duyuru tablolarına HİÇ
  * dokunmaz. Belirsiz (örtüşme doğrulanamayan) atamalara DOKUNMAZ.
  *
+ * BELİRSİZ atamalar: kişi ne kanonik satırın kadrosunda ne de aynı (tarih,saat,salon)
+ * slotundaki HERHANGİ bir aktif satırın kadrosunda. Federasyon o kişiyi maçtan çıkarıp
+ * yerine başkasını koymuş (ör. gözlemci EBRU → GÜLHAN; masa kadrosu toptan değişmiş).
+ * Bot'un `decideAssignmentOutcomes` mantığında bu "CANCELLED" (gerçek iade), sadece stale
+ * satır `cancelledAt` dolmadığı için A1 kapsamında değil.
+ *   - `apply`               : belirsizlere DOKUNMAZ (temkinli varsayılan)
+ *   - `apply-with-removals` : belirsiz atamaları da SİLER + boşalan stale satırı iptal eder
+ *
  * KULLANIM:
- *   npx ts-node scripts/repair-key-mismatch-duplicates.ts report   -> SADECE OKUMA
- *   npx ts-node scripts/repair-key-mismatch-duplicates.ts apply     -> düzeltmeyi uygular
+ *   npx ts-node scripts/repair-key-mismatch-duplicates.ts report              -> SADECE OKUMA
+ *   npx ts-node scripts/repair-key-mismatch-duplicates.ts apply               -> mükerrerleri birleştirir
+ *   npx ts-node scripts/repair-key-mismatch-duplicates.ts apply-with-removals -> + belirsiz (gerçek çıkarılma) temizliği
  */
 
 const CANCEL_REASON = "Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım";
+const CANCEL_REASON_REMOVAL = "Güncel kadroda yok — mükerrer stale kayıt temizliği";
 
 // Not: düz /belirlenecek/i JS'de İ→i̇ (combining dot) dönüşümü yüzünden Türkçe büyük
 // harfli "BELİRLENECEK" ile eşleşmiyor — İ'yi elle normalize ediyoruz.
@@ -91,6 +101,9 @@ interface RepairCandidate {
     movable: { assignmentId: number; userId: number; nameInSpreadsheet: string; fromRowId: number }[];
     // Kaynak satırlar: taşındıktan sonra üzerinde hiç atama kalmayanlar iptal edilecek
     sourceRowIds: number[];
+    // Belirsiz = gerçek çıkarılma: kişi bu slottaki HİÇBİR aktif satırın kadrosunda yok.
+    // apply-with-removals bunları siler; apply dokunmaz.
+    ambiguous: { assignmentId: number; userId: number; nameInSpreadsheet: string; fromRowId: number }[];
 }
 
 async function analyze(): Promise<RepairCandidate[]> {
@@ -174,6 +187,7 @@ async function analyze(): Promise<RepairCandidate[]> {
 
         const movable: RepairCandidate["movable"] = [];
         const sourceRowIds = new Set<number>();
+        const ambiguous: RepairCandidate["ambiguous"] = [];
 
         for (const r of groupRows) {
             if (r.id === canonical.id) continue;
@@ -183,18 +197,28 @@ async function analyze(): Promise<RepairCandidate[]> {
                 if (alreadyOnCanonical || personIsInRow(a, canonical)) {
                     movable.push({ assignmentId: a.id, userId: a.userId, nameInSpreadsheet: a.nameInSpreadsheet, fromRowId: r.id });
                     sourceRowIds.add(r.id);
+                } else {
+                    // Kişi kanonik kadroda yok. Bu SLOT'taki HAM satırların (temsilci
+                    // seçilmemiş olanlar dahil) HERHANGİ birinin kadrosunda var mı?
+                    const onAnyRawRow = rawGroupRows.some(rr =>
+                        rr.id !== a.matchId && personIsInRow(a, rr)
+                    );
+                    if (!onAnyRawRow) {
+                        // Hiçbir yerde yok → gerçek çıkarılma. apply DOKUNMAZ,
+                        // apply-with-removals siler.
+                        ambiguous.push({ assignmentId: a.id, userId: a.userId, nameInSpreadsheet: a.nameInSpreadsheet, fromRowId: a.matchId });
+                    }
+                    // onAnyRawRow ise: A1'in / consolidate'in alanı, burada dokunma.
                 }
-                // Örtüşme doğrulanamayan atamalara BİLEREK dokunulmuyor (belirsiz —
-                // detect script'inde "BELİRSİZ" olarak raporlanıyor).
             }
         }
 
-        if (movable.length === 0) continue;
+        if (movable.length === 0 && ambiguous.length === 0) continue;
 
         candidates.push({
             tarih: canonical.tarih, saat: canonical.saat, salon: canonical.salon,
             canonicalRowId: canonical.id, canonicalMacAdi: canonical.macAdi,
-            movable, sourceRowIds: [...sourceRowIds],
+            movable, sourceRowIds: [...sourceRowIds], ambiguous,
         });
     }
 
@@ -203,27 +227,31 @@ async function analyze(): Promise<RepairCandidate[]> {
 
 async function report() {
     const candidates = await analyze();
-    let totalMovable = 0;
+    let totalMovable = 0, totalAmbiguous = 0;
     for (const c of candidates) {
         totalMovable += c.movable.length;
+        totalAmbiguous += c.ambiguous.length;
         console.log(`\n[${c.tarih} ${c.saat} — ${c.salon}]`);
         console.log(`  → kanonik satır: ${c.canonicalRowId} "${c.canonicalMacAdi}"`);
-        console.log(`  → kaynak satır(lar): ${c.sourceRowIds.join(", ")}`);
-        console.log(`  → taşınacak atama: ${c.movable.length} (${c.movable.map(m => m.nameInSpreadsheet).join(", ")})`);
+        if (c.sourceRowIds.length) console.log(`  → kaynak satır(lar): ${c.sourceRowIds.join(", ")}`);
+        if (c.movable.length) console.log(`  → taşınacak atama: ${c.movable.length} (${c.movable.map(m => m.nameInSpreadsheet).join(", ")})`);
+        if (c.ambiguous.length) console.log(`  → BELİRSİZ = gerçek çıkarılma (apply DOKUNMAZ): ${c.ambiguous.map(m => `${m.nameInSpreadsheet} (satır ${m.fromRowId})`).join(", ")}`);
     }
     console.log(`\n=== ÖZET ===`);
-    console.log(`Düzeltilecek zaman/salon grubu: ${candidates.length}`);
-    console.log(`Taşınacak atama: ${totalMovable}`);
-    console.log(`\n(apply modunda: bu atamaların matchId'si kanonik satıra güncellenecek,`);
-    console.log(` hedefte çakışan atama varsa eski silinecek, kaynak satır(lar) üzerinde`);
-    console.log(` hiç atama kalmazsa cancelReason="${CANCEL_REASON}" ile iptal işaretlenecek.`);
-    console.log(` A1'in aradığı cancelReason metniyle KARIŞMAZ. Geri alma logu basılacak.)`);
+    console.log(`Etkilenen zaman/salon grubu: ${candidates.length}`);
+    console.log(`Kanoniğe taşınacak atama:  ${totalMovable}`);
+    console.log(`BELİRSİZ (apply DOKUNMAZ, apply-with-removals SİLER): ${totalAmbiguous}`);
+    console.log(`\n(apply: taşınan atamaların matchId'si kanonik satıra güncellenir; kaynak satır`);
+    console.log(` boşalırsa cancelReason="${CANCEL_REASON}" ile iptal edilir.`);
+    console.log(` apply-with-removals: EK olarak belirsiz atamaları siler + boşalan satırı`);
+    console.log(` cancelReason="${CANCEL_REASON_REMOVAL}" ile iptal eder. Geri alma logu basılır.)`);
 }
 
-async function apply() {
+async function apply(withRemovals: boolean) {
     const candidates = await analyze();
-    const undoLog: { assignmentId: number; userId: number; oldMatchId: number; newMatchId: number; action: string }[] = [];
+    const undoLog: { assignmentId: number; userId: number; oldMatchId: number; newMatchId: number | null; action: string }[] = [];
     const touchedSourceRows = new Set<number>();
+    const removalRowIds = new Set<number>();
 
     for (const c of candidates) {
         for (const m of c.movable) {
@@ -243,25 +271,36 @@ async function apply() {
             }
             touchedSourceRows.add(m.fromRowId);
         }
+
+        if (withRemovals) {
+            for (const amb of c.ambiguous) {
+                await db.userMatchAssignment.delete({ where: { id: amb.assignmentId } });
+                undoLog.push({ assignmentId: amb.assignmentId, userId: amb.userId, oldMatchId: amb.fromRowId, newMatchId: null, action: "DELETED (genuine removal)" });
+                removalRowIds.add(amb.fromRowId);
+            }
+        }
     }
 
-    // Kaynak satırlardan üzerinde artık hiç atama kalmayanları iptal işaretle.
-    let cancelledRows = 0;
-    for (const rowId of touchedSourceRows) {
+    // Boşalan satırları iptal işaretle. İki ayrı cancelReason.
+    let cancelledMerge = 0, cancelledRemoval = 0;
+    const allTouched = new Set<number>([...touchedSourceRows, ...removalRowIds]);
+    for (const rowId of allTouched) {
         const remaining = await db.userMatchAssignment.count({ where: { matchId: rowId } });
-        if (remaining === 0) {
-            await db.parsedMatch.update({
-                where: { id: rowId },
-                data: { cancelledAt: new Date(), cancelReason: CANCEL_REASON },
-            });
-            cancelledRows++;
-        }
+        if (remaining !== 0) continue;
+        const onlyRemoval = removalRowIds.has(rowId) && !touchedSourceRows.has(rowId);
+        await db.parsedMatch.update({
+            where: { id: rowId },
+            data: { cancelledAt: new Date(), cancelReason: onlyRemoval ? CANCEL_REASON_REMOVAL : CANCEL_REASON },
+        });
+        if (onlyRemoval) cancelledRemoval++; else cancelledMerge++;
     }
 
     console.log("=== GERİ ALMA LOGU (sakla!) ===");
     console.log(JSON.stringify(undoLog, null, 2));
-    console.log(`\n${undoLog.length} atama işlendi. ${cancelledRows} kaynak satır iptal işaretlendi.`);
-    console.log("Kanonik satırlara HİÇ dokunulmadı.");
+    console.log(`\n${undoLog.length} atama işlendi.`);
+    console.log(`${cancelledMerge} satır "${CANCEL_REASON}" ile iptal edildi.`);
+    if (withRemovals) console.log(`${cancelledRemoval} satır "${CANCEL_REASON_REMOVAL}" ile iptal edildi.`);
+    console.log("Kanonik satırlara HİÇ dokunulmadı." + (withRemovals ? "" : " Belirsiz atamalara dokunulmadı."));
 }
 
 async function main() {
@@ -269,9 +308,11 @@ async function main() {
     if (cmd === "report") {
         await report();
     } else if (cmd === "apply") {
-        await apply();
+        await apply(false);
+    } else if (cmd === "apply-with-removals") {
+        await apply(true);
     } else {
-        console.error("Kullanım: npx ts-node scripts/repair-key-mismatch-duplicates.ts <report|apply>");
+        console.error("Kullanım: npx ts-node scripts/repair-key-mismatch-duplicates.ts <report|apply|apply-with-removals>");
         process.exit(1);
     }
     await db.$disconnect();
