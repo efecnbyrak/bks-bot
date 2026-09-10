@@ -128,6 +128,13 @@ logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `
 | Script | Hedef | cancelReason |
 |---|---|---|
 | `repair-false-cancellations.ts` | A1 — `cancelledAt` DOLU eski satır + aktif kardeş (kademeli doldurma sahte iptali) | `Hakem listesinden çıkarıldı` (korunur) |
+
+> **A1 `apply` çalıştırıldı (2026-09-10).** `report` = 50/255; `apply` = 255 atama, hepsi
+> `DELETED (dupe)` (report↔apply arası bot sync'i atamaları zaten kanoniğe taşımıştı, `apply`
+> iptal satırlarındaki kopyaları temizledi). Doğrulama: iptal olmuş kanonik 0, kanonikte
+> aktif atama 309, ikinci `report` = 0 (idempotent). Geri alma logu:
+> `E:\tmp\A1-undo-20260910T175411.json`. Detay: `bks-web-system/docs/web/YAPILACAKLAR.md`
+> "✅ 0.A-TAMAMLANDI — 2026-09-10: A1".
 | `detect-key-mismatch-duplicates.ts` | Salt okuma — isim/tarih değişimi kaynaklı farklı-contentKey ikizi | — |
 | `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
