@@ -21,7 +21,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +30,16 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      # postinstall yok → npm ci Prisma Client üretmiyor. Test script'i @prisma/client
+      # import ettiği için bu adım olmadan "did not initialize yet" ile çöker
+      # (sync-current.yml / sync-archives-once.yml ile aynı adımlar).
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+      - name: Build TypeScript
+        run: npm run build
       - name: Run test script
         run: npx ts-node scripts/test-notification-flow.ts ${{ github.event.inputs.command }}
         env:
