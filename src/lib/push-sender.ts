@@ -3,6 +3,12 @@ import { getMessaging } from "firebase-admin/messaging";
 import { db } from "../db";
 import { logger } from "../logger";
 
+// SYNC: Bu dosyanın alt-seviye FCM gönderim mantığı (getFirebaseApp, DEAD_TOKEN_ERROR_CODES,
+// chunk gönderim, dead-token temizleme) bks-web-system/lib/push-notifications.ts ile aynı
+// mantığı ayrı ayrı implemente ediyor (iki ayrı repo/deploy, ortak paket çıkarmak fayda/
+// maliyet dengesi kötü olduğu için bilinçli yapılmadı). Burada bir düzeltme yapılırsa
+// karşı tarafa da elle taşınmalı.
+
 // FCM'in "bu token bir daha asla çalışmayacak" dediği hata kodları — bunlarla dönen
 // token'lar tabloda tutulmaya devam ederse zamanla push_tokens şişer, boşa istek gider.
 const DEAD_TOKEN_ERROR_CODES = new Set([
