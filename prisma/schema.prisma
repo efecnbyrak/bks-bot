@@ -39,8 +39,6 @@ model User {
   sessionVersion            Int                   @default(0)
   lastLoginAt               DateTime?
   pendingEmail              String?
-  matchStore                Json?
-  matchRefreshQuota         Json?
   resetPasswordCode         String?
   resetPasswordExpiresAt    DateTime?
   recoveryCode              String?               @unique
@@ -200,6 +198,9 @@ model ParsedMatch {
   @@index([driveFileId])
   @@index([contentKey])
   @@index([cancelledAt])
+  // bks-web-system ile şema senkronu — index'in kendisi orada push edildi (db:push
+  // her zaman web reposundan). Burada sadece generate için tanımlı.
+  @@index([cancelledAt, tarihDate])
   @@map("parsed_matches")
 }
 
