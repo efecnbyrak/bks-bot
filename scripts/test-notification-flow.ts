@@ -2,16 +2,18 @@ import crypto from "crypto";
 import { db } from "../src/db";
 import { reconcileAndNotify } from "../src/change-notifier";
 import { NewAssignmentInfo } from "../src/user-matcher";
-import { CancelledMatchInfo } from "../src/db-writer";
+import { CancelledMatchInfo, ShiftedAssignmentInfo } from "../src/db-writer";
 import { MatchData } from "../src/lib/match-parser";
 
 // Test için minimal bir MatchData iskeleti — sadece NewAssignmentInfo.matchData
 // alanını doldurmak için kullanılıyor (kadro özeti üretimi bu senaryoda önemli değil).
-function stubMatchData(macAdi: string, tarih: string): MatchData {
+// hakemler listesi opsiyonel — "update" senaryosunda eski/yeni kadroyu farklı
+// vermek için parametreleştirildi (summarizeSquadChange bu listeleri karşılaştırıyor).
+function stubMatchData(macAdi: string, tarih: string, hakemler: string[] = ["TEST KULLANICI"]): MatchData {
     return {
         mac_adi: macAdi, tarih, saat: undefined, salon: undefined,
         kategori: "TEST", ligTuru: "TEST",
-        hakemler: ["TEST KULLANICI"], masa_gorevlileri: [], saglikcilar: [],
+        hakemler, masa_gorevlileri: [], saglikcilar: [],
         istatistikciler: [], gozlemciler: [], sahaKomiserleri: [],
         kaynak_dosya: TEST_MARKER,
     };
@@ -22,11 +24,12 @@ function stubMatchData(macAdi: string, tarih: string): MatchData {
 //   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts assign   -> "Maça Atandınız" bildirimini gönderir, sahte parsedMatch+assignment oluşturur
 //   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts cancel  -> az önce oluşturulan atamayı iptal eder, "İptal Edildi" bildirimini gönderir
 //   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts change  -> mevcut aktif test maçını iptal edip AYNI ANDA yeni bir maça atar, "Maçınız Değişti" bildirimini test eder
+//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts update  -> kullanıcı AYNI maçta kalır, sadece kadrosu değişir (ROW_SHIFTED), "Maçınız Güncellendi" bildirimini test eder
 //   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts cleanup -> test verilerini DB'den siler
 //
 // "assign" ve "cancel" adımları arasında istediğin kadar bekleyebilirsin (örn. 5 dk) —
 // her ikisi de ayrı process çalıştırması olduğu için zamanlama tamamen sana bağlı.
-// "change" tek başına da çalışır: aktif bir test maçı yoksa önce birini oluşturur.
+// "change" ve "update" tek başına da çalışır: aktif bir test maçı yoksa önce birini oluşturur.
 
 const TEST_MARKER = "__TEST_NOTIFICATION_FLOW__";
 
@@ -137,6 +140,38 @@ async function change(userId: number) {
     console.log("Tamamlandı. Telefonuna 'Maçınız Değişti' bildirimi gitmiş olmalı (iptal DEĞİL, atama DEĞİL — sadece değişti).");
 }
 
+async function update(userId: number) {
+    // Kullanıcının hâlâ aktif bir test ataması var mı — yoksa önce bir tane oluştur
+    // (change() ile aynı desen: "update" tek başına da çalışsın diye).
+    let match = await db.parsedMatch.findFirst({
+        where: { kaynakDosya: TEST_MARKER, cancelledAt: null },
+        orderBy: { createdAt: "desc" },
+    });
+
+    if (!match) {
+        console.log("Aktif test maçı yok, önce oluşturuluyor (TEST A vs TEST B)...");
+        match = await createTestMatchAndAssignment(userId, "TEST A vs TEST B");
+    }
+
+    // Gerçek ROW_SHIFTED senaryosu: kullanıcı AYNI maçta kalıyor (iptal/yeni atama
+    // yok), sadece kadro (hakem listesi) değişiyor — federasyonun "kademeli kadro
+    // doldurma" davranışını simüle eder. matchId/contentKey değişmiyor.
+    const oldMatchData = stubMatchData(match.macAdi, match.tarih, ["TEST KULLANICI"]);
+    const newMatchData = stubMatchData(match.macAdi, match.tarih, ["TEST KULLANICI", "TEST YENİ HAKEM"]);
+
+    const shifted: ShiftedAssignmentInfo[] = [
+        {
+            userId, macAdi: match.macAdi, tarih: match.tarih, contentKey: match.contentKey,
+            oldMatchData, newMatchData,
+        },
+    ];
+
+    console.log(`Mevcut test maçı kadrosu güncelleniyor: matchId=${match.id} (${match.macAdi})`);
+    console.log("TEK reconcileAndNotify çağrısıyla ROW_SHIFTED mantığı tetikleniyor...");
+    await reconcileAndNotify([], [], false, shifted);
+    console.log("Tamamlandı. Telefonuna 'Maçınız Güncellendi' bildirimi gitmiş olmalı (iptal DEĞİL, yeni atama DEĞİL — kullanıcı aynı maçta kaldı).");
+}
+
 async function cancel(userId: number) {
     const match = await db.parsedMatch.findFirst({
         where: { kaynakDosya: TEST_MARKER, cancelledAt: null },
@@ -179,8 +214,8 @@ async function main() {
     const command = process.argv[2];
     const userId = parseInt(process.env.TEST_USER_ID || "", 10);
 
-    if (!command || !["assign", "cancel", "change", "cleanup"].includes(command)) {
-        console.error("Kullanım: TEST_USER_ID=<id> npx ts-node scripts/test-notification-flow.ts <assign|cancel|change|cleanup>");
+    if (!command || !["assign", "cancel", "change", "update", "cleanup"].includes(command)) {
+        console.error("Kullanım: TEST_USER_ID=<id> npx ts-node scripts/test-notification-flow.ts <assign|cancel|change|update|cleanup>");
         process.exit(1);
     }
 
@@ -192,6 +227,7 @@ async function main() {
     if (command === "assign") await assign(userId);
     else if (command === "cancel") await cancel(userId);
     else if (command === "change") await change(userId);
+    else if (command === "update") await update(userId);
     else if (command === "cleanup") await cleanup();
 
     await db.$disconnect();

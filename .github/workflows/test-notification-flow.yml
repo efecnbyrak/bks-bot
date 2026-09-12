@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'assign: yeni atama | cancel: iptal | change: maç değişti (tek çağrıda hem iptal hem yeni atama) | cleanup: test verilerini sil'
+        description: 'assign: yeni atama | cancel: iptal | change: maç değişti (tek çağrıda hem iptal hem yeni atama) | update: aynı maçta kadro güncellendi (ROW_SHIFTED) | cleanup: test verilerini sil'
         required: true
         type: choice
         options:
           - 'assign'
           - 'cancel'
           - 'change'
+          - 'update'
           - 'cleanup'
       test_user_id:
         description: 'Test edilecek gerçek userId (cleanup için gerekmez)'
