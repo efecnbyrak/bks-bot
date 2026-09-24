@@ -624,6 +624,26 @@ export async function detectAndMarkCancelledMatches(
         }
     }
 
+    // 2.5) Gerçek iptaller → CANCELLED kararı verilen UserMatchAssignment satırları
+    // silinir. Bu adım eskiden eksikti: aşağıdaki "hâlâ atama var mı" sayımı (3),
+    // silinmemiş bu satırı görüp eski ParsedMatch satırını asla boşalmış saymıyordu
+    // — sonuç olarak çıkarılan kişi hem eski satırda hem `cancelledAt: null` olarak
+    // sonsuza dek aktif kalıyordu (DRY_RUN simülasyonu bu satırları zaten "yok"
+    // sayıyordu, canlı moddaki asıl silme adımı unutulmuştu).
+    if (!DRY_RUN) {
+        for (const d of decisions.filter(d => d.kind === "CANCELLED")) {
+            try {
+                await db.userMatchAssignment.delete({
+                    where: { userId_matchId: { userId: d.userId, matchId: d.fromMatchId } },
+                });
+            } catch (err: any) {
+                logger.error("İptal edilen atama silinemedi (CANCELLED)", {
+                    userId: d.userId, matchId: d.fromMatchId, error: err?.message,
+                });
+            }
+        }
+    }
+
     // 3) İptal edilecek satırları işaretle. Bir satır ancak ÜZERİNDE HİÇ aktif atama
     // kalmadıysa iptal edilir — böylece maçta kalan kişiler maçını kaybetmez.
     // (a) Gerçek iade satırları

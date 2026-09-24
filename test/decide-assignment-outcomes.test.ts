@@ -174,4 +174,50 @@ describe("decideAssignmentOutcomes", () => {
         assert.equal(out[0].kind, "ROW_SHIFTED");
         assert.equal(out[0].toMatchId, 222649);
     });
+
+    // ---- KANITLANMIŞ ÜRETİM VAKASI (destek talebi, 2026-09-24) ----
+    // matchId 231266 (eski, 3.HAFTA dosyası): hakemler=[ALİ CAN YILMAZ, EMİR EREN],
+    //   masa=[ALPKAN HACIYAKUPOĞLU, ALTAN CANDAN, BERFİN DAĞ]
+    // matchId 231822 AKTİF aynı contentKey (kademeli kadro dolmuş, daha geniş):
+    //   hakemler=[AYHAN CEM AKAN, EMİR EREN] (ALİ CAN YILMAZ çıkarılmış),
+    //   masa AYNI + saglik/istatistik/gozlemci/sahaKomiseri de dolmuş.
+    // Beklenen: EMİR EREN/ALPKAN/ALTAN/BERFİN ROW_SHIFTED, ALİ CAN YILMAZ CANCELLED.
+    // Bu, `detectAndMarkCancelledMatches`'teki eksik silme adımının (CANCELLED kararı
+    // verilen UserMatchAssignment satırının hiç silinmemesi) canlıda yakalandığı vaka —
+    // saf karar fonksiyonu burada zaten doğruydu, hata UYGULAMA adımındaydı (bkz. fix).
+    test("gerçek vaka Ali Can Yılmaz (231266→231822) — çıkarılan kişi CANCELLED, kalanlar ROW_SHIFTED", () => {
+        const rowEski = md({
+            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2026",
+            hakemler: ["ALİ CAN YILMAZ", "EMİR EREN"],
+            masa_gorevlileri: ["ALPKAN HACIYAKUPOĞLU", "ALTAN CANDAN", "BERFİN DAĞ"],
+        });
+        const rowYeni = md({
+            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2026",
+            hakemler: ["AYHAN CEM AKAN", "EMİR EREN"],
+            masa_gorevlileri: ["ALPKAN HACIYAKUPOĞLU", "ALTAN CANDAN", "BERFİN DAĞ"],
+            saglikcilar: ["NURGÜL DEMİR"], istatistikciler: ["ERSAN KIRAN", "HİLAL ÇİÇEK"],
+            gozlemciler: ["RIFAT BAYAR"], sahaKomiserleri: ["ÇETİN SALTAR"],
+        });
+        const people = [
+            { userId: 111, name: "EMİR EREN" }, { userId: 592, name: "ALPKAN HACIYAKUPOĞLU" },
+            { userId: 379, name: "ALTAN CANDAN" }, { userId: 203, name: "BERFİN DAĞ" },
+            { userId: 364, name: "ALİ CAN YILMAZ" },
+        ];
+        const out = decideAssignmentOutcomes(input(
+            people.map(p => ({
+                userId: p.userId, nameInSpreadsheet: p.name,
+                match: { id: 231266, contentKey: "ck-darussafaka-1909", macAdi: rowEski.mac_adi, tarih: rowEski.tarih },
+            })),
+            new Map([["ck-darussafaka-1909", [
+                { id: 231266, data: rowEski },
+                { id: 231822, data: rowYeni },
+            ]]]),
+        ));
+        const byUser = new Map(out.map(o => [o.userId, o]));
+        for (const uid of [111, 592, 379, 203]) {
+            assert.equal(byUser.get(uid)!.kind, "ROW_SHIFTED", `user ${uid} ROW_SHIFTED olmalı`);
+            assert.equal(byUser.get(uid)!.toMatchId, 231822);
+        }
+        assert.equal(byUser.get(364)!.kind, "CANCELLED", "Ali Can Yılmaz (çıkarılan) CANCELLED olmalı");
+    });
 });

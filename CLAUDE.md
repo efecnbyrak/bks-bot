@@ -93,6 +93,19 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
 - `detectAndMarkCancelledMatches` → `CancellationScanResult { cancelled, shifted }` döner.
   `reconcileAndNotify` bunları + `newAssignments`'i alıp `planNotifications` (saf fonksiyon)
   ile kullanıcı bazında tek bir bildirim tipi seçer: `UPDATED` / `CHANGED` / `CANCELLED` / `ASSIGNED`.
+- **BUG DÜZELTİLDİ (2026-09-24, destek talebi):** `CANCELLED` kararı verilen
+  `UserMatchAssignment` satırı, karar doğru hesaplandığı hâlde hiç SİLİNMİYORDU
+  (sadece bildirim için `cancelledMap`'e ekleniyordu) — bu yüzden eski `ParsedMatch`
+  satırı asla "boş" sayılmıyor, `cancelledAt` hiç set edilmiyor, çıkarılan kişi
+  sonsuza dek eski maçı görmeye devam ediyordu. `DRY_RUN` simülasyonu bu satırları
+  zaten "yok" sayıyordu — sadece canlı moddaki asıl silme adımı unutulmuştu. Düzeltme:
+  `detectAndMarkCancelledMatches` içine, `ROW_SHIFTED` uygulamasından hemen sonra
+  ve satır-iptal sayımından ÖNCE, `CANCELLED` kararlı her atamayı silen bir adım
+  eklendi (`src/db-writer.ts`, "2.5" adımı). Regresyon testi:
+  `test/decide-assignment-outcomes.test.ts` → "gerçek vaka Ali Can Yılmaz". Bu bug
+  nedeniyle birikmiş geçmiş veri `scripts/consolidate-active-contentkey-duplicates.ts
+  apply-with-removals` ile temizlendi (bkz. `docs/bot/YAPILACAKLAR.md` madde 6,
+  bks-web-system reposunda).
 - **`NOTIFY_DRY_RUN=1`**: FAZ 2 kararları (atama taşıma, satır iptali, push gönderimi)
   uygulanmaz, sadece loglanır. `upsertParsedMatches` / `buildUserAssignments` normal çalışır.
   `sync-current.yml` `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir
