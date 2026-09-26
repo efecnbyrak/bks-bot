@@ -25,7 +25,8 @@ export interface UserMatchSummary {
 }
 
 // ============================================================
-// Turkish Name Matching — STRICT mode
+// Turkish Name Matching — STRICT mode (kademe 1, hızlı yol)
+// Aşağıdaki fuzzy fallback (kademe 2) bu STRICT eşleşme başarısız olduğunda devreye girer.
 // ============================================================
 
 function normalizeTR(name: string): string {
@@ -84,6 +85,77 @@ export function nameMatches(cellName: string, firstName: string, lastName: strin
     }
 
     return true;
+}
+
+// ============================================================
+// Turkish Name Matching — FUZZY fallback (kademe 2)
+// ============================================================
+// nameMatches() (yukarıdaki hızlı/kelime bazlı yol) eşleşmediğinde devreye girer.
+// Sorun: Excel'de "GENÇOSMAN KOCAEREN" (birleşik) yazılmış ama BKS profilinde
+// "GENÇ OSMAN KOCAEREN" (boşluklu) kayıtlı — kelime sayısı farklı olduğu için
+// yukarıdaki fuzzyMatch bunu yakalayamıyor. Burada tüm boşlukları söküp tek bir
+// harf dizisi üzerinden benzerlik oranına bakıyoruz, kelime bölünmesi artık sorun olmuyor.
+
+/** Türkçe karakterleri ASCII'ye katlar (ç→c, ş→s vb.) — normalizeTR'nin aksine diakritik farkını da yok eder. */
+function foldTR(name: string): string {
+    if (!name) return "";
+    return name
+        .replace(/İ/g, "i").replace(/I/g, "i").replace(/ı/g, "i")
+        .replace(/Ğ/g, "g").replace(/ğ/g, "g")
+        .replace(/Ü/g, "u").replace(/ü/g, "u")
+        .replace(/Ş/g, "s").replace(/ş/g, "s")
+        .replace(/Ö/g, "o").replace(/ö/g, "o")
+        .replace(/Ç/g, "c").replace(/ç/g, "c")
+        .replace(/Â/g, "a").replace(/â/g, "a")
+        .replace(/i̇/g, "i")
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/** foldTR sonucundaki TÜM boşlukları siler — kelime birleşme/ayrılma/sıra farkı böylece anlamsızlaşır. */
+function squash(name: string): string {
+    return foldTR(name).replace(/\s+/g, "");
+}
+
+/** 1 - levenshtein(a,b) / max(len(a),len(b)) — 1.0 tam eşleşme, 0.0 tamamen farklı. */
+function similarityRatio(a: string, b: string): number {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    const maxLen = Math.max(a.length, b.length);
+    if (maxLen === 0) return 1;
+    return 1 - levenshteinSimple(a, b) / maxLen;
+}
+
+/** Genel kullanım için eşik — 584 kayıtlı profilin ikili karşılaştırmasıyla test edilip kararlaştırıldı (docs/bot/YAPILACAKLAR.md madde 5). */
+const FUZZY_SIMILARITY_THRESHOLD = 0.90;
+/** Çok kısa isimlerde (katlanmış hâli bu değerden az harf) yanlış-pozitif riski arttığından eşik yükseltilir. */
+const FUZZY_SHORT_NAME_MIN_LEN = 8;
+const FUZZY_SHORT_NAME_THRESHOLD = 0.95;
+
+/**
+ * nameMatches() başarısız olduğunda çağrılan ikinci kademe — squash edilmiş tam ad
+ * karşılaştırmasıyla benzerlik oranına bakar. Ambiguity kararı (birden fazla aday,
+ * skorlar birbirine çok yakın) burada değil, çağıran tarafta (user-matcher.ts) verilir
+ * çünkü bu fonksiyon tek bir aday çiftini karşılaştırır.
+ */
+export function fuzzyNameMatch(cellName: string, firstName: string, lastName: string): boolean {
+    return fuzzyNameSimilarity(cellName, firstName, lastName) >= fuzzyThresholdFor(firstName, lastName);
+}
+
+/** Ambiguity kontrolü için ham benzerlik skorunu döner (0..1). */
+export function fuzzyNameSimilarity(cellName: string, firstName: string, lastName: string): number {
+    if (!cellName || !firstName || !lastName) return 0;
+    const a = squash(cellName);
+    const b = squash(`${firstName} ${lastName}`);
+    if (!a || !b) return 0;
+    return similarityRatio(a, b);
+}
+
+function fuzzyThresholdFor(firstName: string, lastName: string): number {
+    const folded = squash(`${firstName} ${lastName}`);
+    return folded.length < FUZZY_SHORT_NAME_MIN_LEN ? FUZZY_SHORT_NAME_THRESHOLD : FUZZY_SIMILARITY_THRESHOLD;
 }
 
 function levenshteinSimple(a: string, b: string): number {

@@ -1,9 +1,39 @@
 import { db } from "./db";
-import { nameMatches, MatchData } from "./lib/match-parser";
+import { nameMatches, fuzzyNameSimilarity, MatchData } from "./lib/match-parser";
 import { upsertUserMatchAssignment, computeContentKey } from "./db-writer";
 import { logger } from "./logger";
 
-interface UserProfile {
+/** Ambiguity eşiği: en iyi ve ikinci en iyi aday arasındaki fark bundan küçükse hiçbiri seçilmez. */
+const FUZZY_AMBIGUITY_GAP = 0.05;
+const FUZZY_THRESHOLD_DEFAULT = 0.90;
+
+/**
+ * Bir personel adı için tüm aktif kullanıcılar arasından en iyi fuzzy adayı bulur.
+ * Belirsizlik durumunda (en iyi iki aday birbirine çok yakınsa) kimse döndürülmez —
+ * yanlışlıkla iki farklı kişiyi birbirine karıştırmaktansa hiç atama yapmamak tercih edilir.
+ * Saf fonksiyon (DB'ye dokunmaz) — test edilebilirlik için user-matcher.ts'ten ayrıldı.
+ */
+export function resolveFuzzyCandidate(
+    person: string,
+    users: UserProfile[]
+): { userId: number; similarity: number } | null {
+    const scored = users
+        .map(u => ({ userId: u.userId, similarity: fuzzyNameSimilarity(person, u.firstName, u.lastName) }))
+        .filter(s => s.similarity >= FUZZY_THRESHOLD_DEFAULT)
+        .sort((a, b) => b.similarity - a.similarity);
+
+    if (scored.length === 0) return null;
+    if (scored.length > 1 && scored[0].similarity - scored[1].similarity < FUZZY_AMBIGUITY_GAP) {
+        logger.info("Fuzzy eşleşme belirsiz — atama yapılmadı", {
+            person,
+            candidates: scored.slice(0, 3),
+        });
+        return null;
+    }
+    return scored[0];
+}
+
+export interface UserProfile {
     userId: number;
     firstName: string;
     lastName: string;
@@ -127,6 +157,7 @@ export async function buildUserAssignments(
         if (allPersonnel.length === 0) continue;
 
         const matchedPersonnel = new Set<string>();
+        const matchedUserIds = new Set<number>();
 
         for (const user of users) {
             // Cache her kullanıcı için sıfırlanır — farklı kullanıcıların sonuçları karışmaz
@@ -149,9 +180,47 @@ export async function buildUserAssignments(
             if (!matchedPerson) continue;
 
             matchedPersonnel.add(matchedPerson);
+            matchedUserIds.add(user.userId);
 
             const roleInfo = detectRole(match, matchedPerson);
             if (!roleInfo) continue;
+
+            const ck = contentKeyByMatchId.get(matchId);
+            const isNew = ck ? !existingKeys.has(`${user.userId}:${ck}`) : true;
+            pendingAssignments.push({
+                userId: user.userId,
+                matchId,
+                role: roleInfo.role,
+                nameInSpreadsheet: roleInfo.nameInSpreadsheet,
+                isNew,
+            });
+            assignmentCount++;
+        }
+
+        // Hızlı yol (nameMatches) hiç kimseyle eşleşmeyen personel için ikinci kademe:
+        // squash edilmiş benzerlik oranı (bkz. match-parser.ts fuzzyNameSimilarity).
+        // Bu maçta zaten exact-match ile atanmış kullanıcılar aday havuzundan çıkarılır
+        // (aynı kullanıcının aynı maçta iki isme birden atanmasını önlemek için).
+        const fuzzyCandidatePool = users.filter(u => !matchedUserIds.has(u.userId));
+        for (const person of allPersonnel) {
+            if (matchedPersonnel.has(person)) continue;
+
+            const candidate = resolveFuzzyCandidate(person, fuzzyCandidatePool);
+            if (!candidate) continue;
+
+            const user = fuzzyCandidatePool.find(u => u.userId === candidate.userId)!;
+            matchedPersonnel.add(person);
+            matchedUserIds.add(user.userId);
+
+            const roleInfo = detectRole(match, person);
+            if (!roleInfo) continue;
+
+            logger.info("Fuzzy eşleşme ile atama yapıldı", {
+                person,
+                userId: user.userId,
+                similarity: candidate.similarity,
+                matchName: match.mac_adi,
+            });
 
             const ck = contentKeyByMatchId.get(matchId);
             const isNew = ck ? !existingKeys.has(`${user.userId}:${ck}`) : true;

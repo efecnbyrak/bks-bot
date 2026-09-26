@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { detectRole } from "../src/user-matcher";
+import { detectRole, resolveFuzzyCandidate, UserProfile } from "../src/user-matcher";
 import { MatchData } from "../src/lib/match-parser";
 
 function makeMatch(overrides: Partial<MatchData> = {}): MatchData {
@@ -50,5 +50,35 @@ describe("detectRole", () => {
         const match = makeMatch({ hakemler: ["Ali Veli"], masa_gorevlileri: ["Ali Veli"] });
         const result = detectRole(match, "Ali Veli");
         assert.equal(result?.role, "hakem");
+    });
+});
+
+describe("resolveFuzzyCandidate", () => {
+    function makeUser(overrides: Partial<UserProfile>): UserProfile {
+        return { userId: 1, firstName: "Ali", lastName: "Veli", ...overrides };
+    }
+
+    test("tek net aday varsa onu döner", () => {
+        const users = [
+            makeUser({ userId: 412, firstName: "GENÇ OSMAN", lastName: "KOCAEREN" }),
+            makeUser({ userId: 2, firstName: "Ayşe", lastName: "Yılmaz" }),
+        ];
+        const result = resolveFuzzyCandidate("GENÇOSMAN KOCAEREN", users);
+        assert.equal(result?.userId, 412);
+    });
+
+    test("eşiği geçen aday yoksa null döner", () => {
+        const users = [makeUser({ userId: 1, firstName: "Ayşe", lastName: "Yılmaz" })];
+        const result = resolveFuzzyCandidate("Bambaşka Biri", users);
+        assert.equal(result, null);
+    });
+
+    test("iki aday birbirine çok yakınsa (belirsiz) null döner", () => {
+        const users = [
+            makeUser({ userId: 1, firstName: "Mehmet", lastName: "Kocaeran" }),
+            makeUser({ userId: 2, firstName: "Mehmet", lastName: "Kocaerin" }),
+        ];
+        const result = resolveFuzzyCandidate("Mehmet Kocaeren", users);
+        assert.equal(result, null);
     });
 });
