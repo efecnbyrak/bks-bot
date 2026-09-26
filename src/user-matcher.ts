@@ -3,6 +3,10 @@ import { nameMatches, fuzzyNameSimilarity, MatchData } from "./lib/match-parser"
 import { upsertUserMatchAssignment, computeContentKey } from "./db-writer";
 import { logger } from "./logger";
 
+// NOTIFY_DRY_RUN=1 → kullanıcı atama satırları DB'ye YAZILMAZ, sadece loglanır.
+// db-writer.ts'teki aynı isimli sabitle aynı ortam değişkenini paylaşır.
+const DRY_RUN = process.env.NOTIFY_DRY_RUN === "1";
+
 /** Ambiguity eşiği: en iyi ve ikinci en iyi aday arasındaki fark bundan küçükse hiçbiri seçilmez. */
 const FUZZY_AMBIGUITY_GAP = 0.05;
 const FUZZY_THRESHOLD_DEFAULT = 0.90;
@@ -258,13 +262,20 @@ export async function buildUserAssignments(
         });
     }
 
-    // Pool limit (5) aşılmasın diye küçük batch — 200 paralel pool'u tüketiyordu
-    const ASSIGN_BATCH = 5;
-    for (let i = 0; i < pendingAssignments.length; i += ASSIGN_BATCH) {
-        const batch = pendingAssignments.slice(i, i + ASSIGN_BATCH);
-        await Promise.all(batch.map(a =>
-            upsertUserMatchAssignment(a.userId, a.matchId, a.role, a.nameInSpreadsheet)
-        ));
+    if (!DRY_RUN) {
+        // Pool limit (5) aşılmasın diye küçük batch — 200 paralel pool'u tüketiyordu
+        const ASSIGN_BATCH = 5;
+        for (let i = 0; i < pendingAssignments.length; i += ASSIGN_BATCH) {
+            const batch = pendingAssignments.slice(i, i + ASSIGN_BATCH);
+            await Promise.all(batch.map(a =>
+                upsertUserMatchAssignment(a.userId, a.matchId, a.role, a.nameInSpreadsheet)
+            ));
+        }
+    } else {
+        logger.info("Atama oluşturma tamamlandı (DRY_RUN — DB'ye yazılmadı)", {
+            toplam: pendingAssignments.length,
+            yeniAtamaSayisi: pendingAssignments.filter(a => a.isNew).length,
+        });
     }
 
     const newAssignments: NewAssignmentInfo[] = pendingAssignments
