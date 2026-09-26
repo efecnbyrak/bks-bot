@@ -107,9 +107,15 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   apply-with-removals` ile temizlendi (bkz. `docs/bot/YAPILACAKLAR.md` madde 6,
   bks-web-system reposunda).
 - **`NOTIFY_DRY_RUN=1`**: FAZ 2 kararları (atama taşıma, satır iptali, push gönderimi)
-  uygulanmaz, sadece loglanır. `upsertParsedMatches` / `buildUserAssignments` normal çalışır.
-  `sync-current.yml` `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir
-  (cron turları etkilenmez).
+  uygulanmaz, sadece loglanır. `upsertDriveFile` / `upsertParsedMatches` normal çalışır
+  (matchId üretmeleri gerekiyor). **`buildUserAssignments`'ın (`src/user-matcher.ts`)
+  gerçek `UserMatchAssignment` yazma adımı da bu bayrakla korunuyor (2026-09-26'da
+  eklendi)** — isim eşleştirme/ambiguity kontrolü/`assignmentCount` hesabı yine tam
+  çalışır, sadece DB'ye yazılmaz. Hem `sync-current.yml` hem `sync-archives-once.yml`
+  `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir (cron turları
+  etkilenmez). **Neden `sync-archives-once.yml`'e de eklendi:** 2026-09-26'da bu
+  workflow önizlemesiz `sync_mode: archive-full` ile elle çalıştırılıp production'a
+  53.284 satır yazmıştı (bkz. `docs/bot/YAPILACAKLAR.md` madde 5 detayı).
 - **`evaluateCancellationSafety` sigortası**: bir dosyada iptal adayı ≥25 atama VE dosyanın
   aktif atamalarının >%40'ıysa (başlık bozulması / kolon kayması şüphesi) hiçbir iptal
   yazılmaz, `logger.error` ile loglanır. Eşiği düşürmeden önce günlük normal iade hacmini
