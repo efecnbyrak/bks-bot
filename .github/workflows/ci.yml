@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+        env:
+          # Testler ve typecheck gerçek DB'ye bağlanmıyor (Prisma Client sadece
+          # tip üretimi + kod yolu için gerekiyor), bu yüzden sahte bir URL yeterli.
+          DATABASE_URL: postgresql://user:pass@localhost:5432/db
+          DIRECT_URL: postgresql://user:pass@localhost:5432/db
+
+      - run: npm run typecheck
+
+      - run: npm run test

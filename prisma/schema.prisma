@@ -41,15 +41,26 @@ model User {
   pendingEmail              String?
   resetPasswordCode         String?
   resetPasswordExpiresAt    DateTime?
-  recoveryCode              String?               @unique
   videoProgress             VideoProgress[]
   sectionVisits             SectionVisit[]
   ruleProgress              RuleProgress[]
+  ruleReadingPositions      RuleReadingPosition[]
   securityQuestion          String?
   securityAnswer            String?
   mobileTokenApp            String?               @unique
   mobileTokenAppExpiry      DateTime?
   passwordResetRequired     Boolean               @default(false)
+  // bks-web-system KVKK aydınlatma/açık rıza onayı için eklendi. Bot bu alanları
+  // OKUMAZ/YAZMAZ; yalnızca şema senkronu için burada.
+  kvkkConsentAt             DateTime?
+  kvkkConsentVersion        String?
+  // bks-web-system 0.SD (soft delete) için eklendi. Bot bu alanları OKUMAZ/YAZMAZ;
+  // yalnızca şema senkronu için burada. loadActiveUsers() zaten isActive:true
+  // filtreliyor ve soft-delete bunu false yapıyor, bu yüzden bot davranışı
+  // hiç değişmedi — ekstra kod gerekmedi. Şema push'ları HER ZAMAN bks-web-system'den.
+  deletedAt                 DateTime?
+  deletedById               Int?
+  deleteReason              String?               @db.Text
   auditLogs                 AuditLog[]
   announcements             Announcement[]
   penalties                 Penalty[]
@@ -59,11 +70,13 @@ model User {
   announcementReads         AnnouncementRead[]
   userMatchAssignments      UserMatchAssignment[]
   pushTokens                PushToken[]
+  availabilityNotifications AvailabilityNotification[]
 
   @@index([username])
   @@index([roleId])
   @@index([isActive])
   @@index([isApproved, isActive])
+  @@index([deletedAt])
   @@map("users")
 }
 
@@ -594,4 +607,54 @@ model SupportTicket {
   @@index([type])
   @@index([createdAt])
   @@map("support_tickets")
+}
+
+// bks-web-system'daki RolePermission/AvailabilityNotification/RuleReadingPosition
+// ile senkron (2026-09-26). Bot bu modellere hiç dokunmaz, yalnızca şema
+// senkronu için burada.
+
+model RolePermission {
+  id                    Int      @id @default(autoincrement())
+  roleName              String   @unique
+  canEditClassification Boolean  @default(true)
+  canEditOfficialType   Boolean  @default(true)
+  canEditName           Boolean  @default(true)
+  canEditPhone          Boolean  @default(false)
+  canEditEmail          Boolean  @default(false)
+  canEditAddress        Boolean  @default(false)
+  canEditIban           Boolean  @default(false)
+  canAddPenalty         Boolean  @default(true)
+  canDeletePenalty      Boolean  @default(true)
+  canEditPenalty        Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+
+  @@map("role_permissions")
+}
+
+model AvailabilityNotification {
+  id            Int       @id @default(autoincrement())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        Int
+  weekStartDate DateTime
+  type          String
+  sentAt        DateTime  @default(now())
+  readAt        DateTime?
+
+  @@unique([userId, weekStartDate, type])
+  @@index([userId])
+  @@map("availability_notifications")
+}
+
+model RuleReadingPosition {
+  id           Int      @id @default(autoincrement())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
+  type         String
+  articleId    String
+  scrollOffset Int      @default(0)
+  elapsedMs    Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, type])
+  @@map("rule_reading_position")
 }
