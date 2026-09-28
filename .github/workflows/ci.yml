@@ -13,7 +13,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # package.json engines.node: >=22 — CI bunun altında kalırsa (denendi:
+          # node 20'de test script'i "test/**/*.test.ts" glob'unu genişletemiyor,
+          # "Could not find" hatası veriyor) sürüm uyuşmazlığı sessizce farklı
+          # hatalara yol açabiliyor.
+          node-version: 22
           cache: npm
 
       - run: npm ci
