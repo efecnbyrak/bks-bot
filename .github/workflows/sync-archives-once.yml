@@ -23,7 +23,7 @@ on:
         type: choice
         options: ['false', 'true']
       force_sync:
-        description: 'Jitter atla ve zorla sync yap (sync-current.yml ile aynı mekanizma — "current" klasöründe otomatik cron jitter'ı sürekli tetikleyip elle çalıştırmayı atlatabiliyor)'
+        description: 'Jitter atla ve zorla sync yap (sync-current.yml ile aynı mekanizma - current klasöründe otomatik cron jitter mekanizmasını sürekli tetikleyip elle çalıştırmayı atlatabiliyor)'
         required: false
         default: 'false'
         type: choice
