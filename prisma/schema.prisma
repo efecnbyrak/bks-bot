@@ -494,6 +494,7 @@ model Announcement {
   subject   String
   content   String             @db.Text
   target    String             @default("ALL")
+  source    String             @default("ADMIN")
   sender    User?              @relation(fields: [senderId], references: [id])
   senderId  Int?
   sentCount Int                @default(0)

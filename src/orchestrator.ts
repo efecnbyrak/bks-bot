@@ -12,7 +12,7 @@ import {
     ShiftedAssignmentInfo,
 } from "./db-writer";
 import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
-import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync } from "./config";
+import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync, getSeasonKeyForFolder } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
 
@@ -144,8 +144,10 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
 
                 if (matches.length === 0) continue;
 
-                // Maçları yaz
-                const matchIds = await upsertParsedMatches(matches, driveFileDbId, folderKey);
+                // Maçları yaz — sezon alanına folderKey'in kendisi değil, ondan çözülen
+                // gerçek sezon adı ("2026-2027" gibi) yazılır (bkz. getSeasonKeyForFolder).
+                const seasonKey = getSeasonKeyForFolder(folderKey);
+                const matchIds = await upsertParsedMatches(matches, driveFileDbId, seasonKey);
                 matchesUpserted += matchIds.length;
 
                 // Kullanıcı atamalarını oluştur

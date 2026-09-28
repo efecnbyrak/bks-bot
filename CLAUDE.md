@@ -54,6 +54,22 @@ gerçekten okunan bilgiye dayanmalı:
 - Emin olunmayan bir bilgi asla md'ye yazılmaz; önce kod/şema/git okunarak
   doğrulanır.
 
+## Sezon Alanı (`ParsedMatch.sezon`) — ZORUNLU
+
+`upsertParsedMatches`'e (`src/db-writer.ts`) `sezon` parametresi olarak **ASLA ham
+`folderKey`** ("current", "latest-season" gibi) verilmez — bu, web tarafında
+(`bks-web-system/lib/matches/season.ts`) "en güncel sezon"un alfabetik sıralamayla
+yanlış tespit edilmesine yol açan bir bug'dı (2026-09-28'de bulundu: "current" 617,
+"latest-season" 114 satır canlı DB'de doğrulandı, ~85K atama yanlışlıkla "eski sezon"
+sanılıp gizlendi). `src/orchestrator.ts` artık `getSeasonKeyForFolder(folderKey)`
+(`src/config.ts`) ile çözülen GERÇEK sezon adını ("2026-2027" gibi) kullanıyor.
+**Yeni bir `DRIVE_FOLDERS` anahtarı veya `resolveSyncFolderKeys()`'e yeni bir özel
+anahtar türü ("current"/"latest-season" gibi) eklenirse, `FOLDER_SEASON_KEYS` map'ine
+de o anahtarın gerçek sezon karşılığı eklenmeli** — aksi halde aynı bug farklı bir
+anahtarla geri gelir. Web tarafı artık `sezon` string'ine filtrelemede hiç
+güvenmiyor (takvime göre filtreliyor) ama alan hâlâ UI'da ham gösterim için
+kullanılıyor, o yüzden doğru değer yazmak önemini koruyor.
+
 ## Şema Senkron Checklist'i
 
 1. `bks-web-system/prisma/schema.prisma`'da bir değişiklik yapıldığını öğrendiğinde: bu
@@ -74,6 +90,13 @@ gerçekten okunan bilgiye dayanmalı:
    switch'ine de eklenmeli.
 4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
    yana açılıp model/alan/index listesi karşılaştırılmalı.
+5. **`Announcement.source` senkronu (2026-09-28):** web'in `schema.prisma`'sındaki
+   `source String @default("ADMIN")` bu repoya da eklendi, `npx prisma generate`
+   çalıştırıldı. `db.announcement.create` çağrısına (`src/db-writer.ts`) bilinçli
+   olarak `source` set edilmedi — bot'un `senderId: null` bırakıp DB default'unu
+   ("ADMIN") almaya devam etmesi, web'in bot-satırlarını ayırt etme mantığıyla
+   (`senderId: {not: null}` filtresi) tutarlı; `source` elle set edilirse bu ayrım
+   bozulabilir, önce web tarafı kontrol edilmeden değiştirilmemeli.
 
 ## Bildirim Kararı — İptal / Güncelleme / Yeni Atama (ZORUNLU)
 

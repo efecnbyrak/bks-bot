@@ -53,6 +53,18 @@ export function getCurrentSeasonKey(date: Date = new Date()): string {
     return `${startYear}-${startYear + 1}`;
 }
 
+// folderKey ("current", "latest-season" veya doğrudan sezon adı) ile o klasörün
+// GERÇEK sezon adı ("2026-2027" gibi) arasındaki eşleşmeyi tutar. ParsedMatch.sezon
+// alanına folderKey'in kendisi DEĞİL, buradan çözülen gerçek sezon adı yazılmalı —
+// aksi halde bks-web-system tarafında "current"/"latest-season" ham string'leri
+// alfabetik sıralamada yanlışlıkla "en güncel sezon" sanılıyor (2026-09-28'de
+// tespit edilen hata, bkz. bks-web-system lib/matches/season.ts).
+const FOLDER_SEASON_KEYS: Record<string, string> = {};
+
+export function getSeasonKeyForFolder(folderKey: string): string {
+    return FOLDER_SEASON_KEYS[folderKey] ?? folderKey;
+}
+
 // SYNC_FOLDER_KEY virgülle ayrılmış birden fazla anahtar içerebilir (örn. "current,2025-2026").
 // "current" DRIVE_FOLDERS'ta statik olarak tanımlı; sezon adı (örn. "2025-2026") verilirse
 // ARCHIVE_ROOT_ID altında o isimde bir klasör aranıp bulunursa DRIVE_FOLDERS'a kaydedilir.
@@ -67,6 +79,11 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
     let seasonCache: { key: string; id: string; year: number }[] | null = null;
 
     for (const key of keys) {
+        if (key === "current") {
+            // DRIVE_FOLDERS["current"] statik tanımlı olduğu için aşağıdaki genel
+            // "zaten kayıtlı" kontrolüyle atlanır — gerçek sezon adı burada ayrıca set edilir.
+            FOLDER_SEASON_KEYS["current"] = getCurrentSeasonKey();
+        }
         if (DRIVE_FOLDERS[key]) continue;
         if (key === "latest-season") {
             seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
@@ -79,12 +96,14 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
             const chosen = exact ?? seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
 
             registerFolder("latest-season", { id: chosen.id, maxDepth: 2 });
+            FOLDER_SEASON_KEYS["latest-season"] = chosen.key;
             continue;
         }
         seasonCache ??= await listSeasonFolders(ARCHIVE_ROOT_ID);
         const found = seasonCache.find(s => s.key === key);
         if (!found) throw new Error(`Geçersiz SYNC_FOLDER_KEY: "${key}" (arşiv kökünde böyle bir sezon klasörü yok)`);
         registerFolder(key, { id: found.id, maxDepth: 2 });
+        FOLDER_SEASON_KEYS[key] = key;
     }
 
     return keys;
