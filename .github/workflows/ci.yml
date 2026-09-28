@@ -8,6 +8,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Job seviyesinde tanımlanıyor ki her adım (generate/typecheck/test) aynı
+    # env'i görsün — bir adıma özel env: bloğu diğer adımlara miras kalmıyor,
+    # ilk sürümde bu yüzden testler "DATABASE_URL undefined" ile kırmızı çıktı
+    # (src/db.ts modül yüklenirken PrismaClient(datasources.db.url) okuyor).
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db
+      DIRECT_URL: postgresql://user:pass@localhost:5432/db
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +30,6 @@ jobs:
       - run: npm ci
 
       - run: npx prisma generate
-        env:
-          # Testler ve typecheck gerçek DB'ye bağlanmıyor (Prisma Client sadece
-          # tip üretimi + kod yolu için gerekiyor), bu yüzden sahte bir URL yeterli.
-          DATABASE_URL: postgresql://user:pass@localhost:5432/db
-          DIRECT_URL: postgresql://user:pass@localhost:5432/db
 
       - run: npm run typecheck
 
