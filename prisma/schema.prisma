@@ -204,6 +204,12 @@ model ParsedMatch {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // bks-web-system ile şema senkronu — bu alan Ödemeler (3x3 Seans ücreti) için
+  // kullanıcı tarafından web/mobil'de girilir, bot ASLA yazmaz (db-writer.ts
+  // update payload'ında yok). Burada sadece generate için tanımlı, db:push
+  // her zaman web reposundan yapılır.
+  seansSayisi     Int?
+
   userAssignments UserMatchAssignment[]
 
   @@index([tarihDate])
