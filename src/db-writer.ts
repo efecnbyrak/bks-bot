@@ -28,13 +28,39 @@ export function computeContentKey(match: MatchData): string {
     return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
 }
 
+// "20 Aralık 2025 Cumartesi" gibi uzun Türkçe tarihler bazı kaynak dosyalarda
+// (OKUL İL VE İLÇE, ARŞİV TBF-FIBA-MİLLİ MAÇLAR, ARŞİV ÖZEL LİG VE ÜNİVERSİTE)
+// sayısal DD.MM.YYYY yerine kullanılıyor — eski regex bunu hiç tanımıyordu,
+// tarihDate NULL kalıyordu (568 satır, 2026-09-29'da tespit edildi). Web tarafı
+// tarihDate:null kayıtları sezon filtresinde bilerek görünür bıraktığı için bu,
+// eski VE yeni sezon maçlarının ayrıştırılamayıp karışık görünmesine yol açıyordu.
+const TURKISH_MONTHS: Record<string, string> = {
+    "ocak": "01", "şubat": "02", "subat": "02", "mart": "03", "nisan": "04",
+    "mayıs": "05", "mayis": "05", "haziran": "06", "temmuz": "07", "ağustos": "08",
+    "agustos": "08", "eylül": "09", "eylul": "09", "ekim": "10", "kasım": "11",
+    "kasim": "11", "aralık": "12", "aralik": "12",
+};
+
 export function parseTarihDate(tarih: string): Date | null {
     if (!tarih) return null;
-    const match = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
-    if (!match) return null;
-    const [, day, month, year] = match;
-    const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00.000Z`);
-    return isNaN(d.getTime()) ? null : d;
+
+    const numeric = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+    if (numeric) {
+        const [, day, month, year] = numeric;
+        const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00.000Z`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    const turkish = tarih.match(/(\d{1,2})\s+([a-zçğıöşü]+)\s+(\d{4})/i);
+    if (turkish) {
+        const [, day, monthName, year] = turkish;
+        const month = TURKISH_MONTHS[monthName.toLocaleLowerCase("tr")];
+        if (!month) return null;
+        const d = new Date(`${year}-${month}-${day.padStart(2, "0")}T00:00:00.000Z`);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    return null;
 }
 
 export async function upsertDriveFile(

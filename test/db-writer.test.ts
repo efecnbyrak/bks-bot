@@ -124,4 +124,24 @@ describe("parseTarihDate", () => {
     test("tanınmayan format için null döner", () => {
         assert.equal(parseTarihDate("geçersiz tarih"), null);
     });
+
+    test("uzun Türkçe tarih formatını (gün ayadı yıl) parse eder", () => {
+        const d = parseTarihDate("20 Aralık 2025 Cumartesi");
+        assert.ok(d);
+        assert.equal(d!.getUTCFullYear(), 2025);
+        assert.equal(d!.getUTCMonth(), 11); // 0-indexed => Aralık
+        assert.equal(d!.getUTCDate(), 20);
+    });
+
+    test("uzun Türkçe tarih formatı — gün adı olmadan da çalışır", () => {
+        const d = parseTarihDate("26 Eylül 2026");
+        assert.ok(d);
+        assert.equal(d!.getUTCFullYear(), 2026);
+        assert.equal(d!.getUTCMonth(), 8); // 0-indexed => Eylül
+        assert.equal(d!.getUTCDate(), 26);
+    });
+
+    test("Türkçe ay adı içermeyen serbest metin için null döner", () => {
+        assert.equal(parseTarihDate("15 XYZ 2026 Pazartesi"), null);
+    });
 });

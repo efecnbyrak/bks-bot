@@ -70,6 +70,19 @@ anahtarla geri gelir. Web tarafı artık `sezon` string'ine filtrelemede hiç
 güvenmiyor (takvime göre filtreliyor) ama alan hâlâ UI'da ham gösterim için
 kullanılıyor, o yüzden doğru değer yazmak önemini koruyor.
 
+## Tarih Ayrıştırma (`parseTarihDate`) — Türkçe Uzun Format (2026-09-29'da eklendi)
+
+`src/db-writer.ts` → `parseTarihDate()` artık hem sayısal `DD.MM.YYYY` hem de uzun Türkçe
+format (`"20 Aralık 2025 Cumartesi"`) tanıyor. Eski regex sadece sayısal formatı tanıyordu;
+bazı kaynak dosyalar (OKUL İL VE İLÇE, ARŞİV TBF-FIBA-MİLLİ MAÇLAR, ARŞİV ÖZEL LİG VE
+ÜNİVERSİTE) tarihi uzun Türkçe formatta veriyor, bu satırlar `tarihDate: NULL` kalıyordu
+(568 satır, 2026-09-29'da tespit edildi). Web tarafı `tarihDate: null` kayıtları sezon
+filtresinde bilerek görünür bıraktığı için (`bks-web-system/lib/matches/season.ts`) bu,
+eski ve yeni sezon maçlarının ayrıştırılamayıp karışık görünmesine yol açıyordu.
+**Yeni bir kaynak dosya/ay formatı eklenirse `TURKISH_MONTHS` map'i genişletilmeli.**
+Geçmişte yazılmış NULL satırlar `scripts/backfill-turkish-tarihdate.ts` (report/apply)
+ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır silinmez.
+
 ## Şema Senkron Checklist'i
 
 1. `bks-web-system/prisma/schema.prisma`'da bir değişiklik yapıldığını öğrendiğinde: bu
@@ -181,6 +194,7 @@ logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `
 | `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `repair-salon-rename-duplicates.ts` | Salon adı varyasyonu (`PAIRS` dizisinde elle enumerate edilmiş çiftler) | `Salon adı varyasyonu — mükerrer stale kayıt temizliği` |
+| `backfill-turkish-tarihdate.ts` | `tarihDate: NULL` satırlar (uzun Türkçe tarih formatı parse edilemediği için, bkz. yukarıdaki "Tarih Ayrıştırma" bölümü). Sadece `tarihDate` UPDATE edilir, satır silinmez/iptal edilmez | — (cancelReason yok, sadece tarih dolduruluyor) |
 
 Yeni bir mükerrer deseni çıkarsa: önce hangi alanın `contentKey`'i değiştirdiğini tespit et
 (mac_adi / tarih / saat / salon), sonra ilgili script'i genişlet veya yeni bir hedefli
