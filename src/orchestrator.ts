@@ -13,7 +13,7 @@ import {
     parseTarihDate,
 } from "./db-writer";
 import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
-import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync, getSeasonKeyForFolder, getSeasonCutoffDate } from "./config";
+import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync, getSeasonKeyForFolder, getSeasonCutoffDate, resolveCurrentSeasonKey } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
 
@@ -125,8 +125,26 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
         // Lazy-load ExcelJS only when there are files to process
         const { default: ExcelJSRuntime } = await import("exceljs");
 
+        // AKTİF SEZONUN ARŞİV KOPYASI ATLANIR (2026-10-01).
+        // Federasyon, içinde bulunduğumuz sezonun bir "ARŞİV ..." kopyasını da arşiv
+        // klasöründe tutuyor. Canlı dosya güncel klasörde zaten var; arşiv kopyası
+        // elle başlatılan `SYNC_MODE=archive-full` turunda çekilince aynı maçlar ikinci
+        // kez yazılıyor ve o kopyanın sütun düzeni farklı olduğu için ayrıştırılamayan
+        // çöp satırlar üretiyordu. Geçmiş sezonların arşivleri etkilenmez.
+        const activeSeasonKey = await resolveCurrentSeasonKey();
+        const folderSeasonKey = getSeasonKeyForFolder(folderKey);
+        const isArchiveOfActiveSeason = (fileName: string) =>
+            /AR[ŞS]İ?V/i.test(fileName) && folderSeasonKey === activeSeasonKey;
+
         for (const file of toProcess) {
             try {
+                if (isArchiveOfActiveSeason(file.name)) {
+                    logger.info("Aktif sezonun ARŞİV kopyası atlandı (canlı dosya güncel klasörde)", {
+                        fileName: file.name, seasonKey: folderSeasonKey,
+                    });
+                    continue;
+                }
+
                 logger.info("Dosya işleniyor", { fileName: file.name, fileId: file.id });
 
                 const buffer = await withRetry(() =>
@@ -176,7 +194,7 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
 
                 // Maçları yaz — sezon alanına folderKey'in kendisi değil, ondan çözülen
                 // gerçek sezon adı ("2026-2027" gibi) yazılır (bkz. getSeasonKeyForFolder).
-                const seasonKey = getSeasonKeyForFolder(folderKey);
+                const seasonKey = folderSeasonKey;
                 const matchIds = await upsertParsedMatches(matches, driveFileDbId, seasonKey);
                 matchesUpserted += matchIds.length;
 

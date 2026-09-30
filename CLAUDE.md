@@ -84,6 +84,38 @@ hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullan
 — aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Detay:
 `bks-web-system/docs/bot/YAPILACAKLAR.md` TAMAMLANANLAR.
 
+## Excel Hücresi Okuma — UTC ZORUNLU (2026-10-01)
+
+`src/lib/match-parser.ts` → `cellToString`'in `Date` dalı **UTC getter'ları** kullanır
+(`getUTCHours`, `getUTCMinutes`, `getUTCDate`, `getUTCMonth`, `getUTCFullYear`).
+ExcelJS saat/tarih hücrelerini UTC olarak saklıyor (18:00 → `1899-12-30T18:00:00Z`).
+`getHours()` yerel saat dilimini uyguluyor ve 1899 için İstanbul farkı `+01:56:56`
+olduğundan saat KAYIYORDU: saklanan `18:00` → `"19:56"`.
+
+Sonucu web tarafında görüldü: Atamalar sayfasında yanlış maç saatleri ve aynı maçın iki
+farklı saatle iki kez yazılması (177 mükerrer `GameAssignment`). **Yerel getter kullanmak
+yasak.** Web reposundaki `lib/__tests__/match-parser-saat.test.ts` bu davranışı kilitliyor.
+
+## Maç Adı Çıkarılamayan Satır YAZILMAZ (2026-10-01)
+
+Eskiden son çare olarak `macAdi = \`${category} — ${ws.name}\`` yazılıyordu. Bu, sütun
+düzeni farklı olan dosyalardan (özellikle arşiv kopyaları) çöp kayıtlar üretiyordu
+(ör. maç adı "ÖZEL LİG VE ÜNİVERSİTE (2026 - 2027) — GÜNCEL") ve bu çöp web'in Ödemeler
+sayfasına kategori olarak da sızıyordu. Artık satır atlanıyor, sayısı dosya sonunda
+`[PARSER] ... satır atlandı` olarak loglanıyor. **Bu log'daki sayı artıyorsa kaynak
+dosyanın başlıkları değişmiş demektir** — `scripts/inspect-drive-headers.ts` ile bak.
+
+## Aktif Sezonun ARŞİV Kopyası Atlanır (2026-10-01)
+
+Federasyon, içinde bulunduğumuz sezonun bir "ARŞİV ..." kopyasını da arşiv klasöründe
+tutuyor. Canlı dosya güncel klasörde zaten var; arşiv kopyası elle başlatılan
+`SYNC_MODE=archive-full` turunda çekilince aynı maçlar ikinci kez yazılıyor ve o kopyanın
+sütun düzeni farklı olduğu için ayrıştırılamayan satırlar üretiyordu.
+
+`src/orchestrator.ts` dosya döngüsünde: dosya adı `/AR[ŞS]İ?V/i` ile eşleşiyor **ve** o
+klasörün sezon anahtarı `resolveCurrentSeasonKey()` ile aynıysa dosya atlanır + loglanır.
+Geçmiş sezonların arşivleri etkilenmez (onlar zaten sezon kesim filtresinden düşüyor).
+
 ## Sütun Başlığı Eşlemesi — Tanınmayan Başlık = Sessiz Veri Kaybı (2026-09-30)
 
 `src/lib/match-parser.ts` sütunları BAŞLIK METNİNE göre eşliyor (`colMap`). Bir başlık

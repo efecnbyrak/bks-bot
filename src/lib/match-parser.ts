@@ -194,13 +194,20 @@ function cellToString(cell: any): string {
         if (cell.hyperlink) return String(cell.text || cell.hyperlink).trim();
         if (cell instanceof Date) {
             const d = cell as Date;
-            if (d.getFullYear() < 1910) {
-                const h = d.getHours().toString().padStart(2, "0");
-                const m = d.getMinutes().toString().padStart(2, "0");
+            // DİKKAT — burada UTC getter'ları kullanmak ZORUNLU, yerel olanlar DEĞİL.
+            // ExcelJS saat/tarih hücrelerini UTC olarak saklıyor (ör. 18:00 →
+            // 1899-12-30T18:00:00Z). `getHours()` yerel saat dilimini uyguluyor ve
+            // 1899 için İstanbul farkı +01:56:56 olduğundan saat KAYIYORDU:
+            // saklanan 18:00 → "19:56". Gerçek sonuç: yanlış maç saatleri ve aynı
+            // maçın iki farklı saatle iki kez yazılması (2026-10-01'de tespit edildi).
+            // Excel saat-only değerlerini Aralık 1899 tarihleri olarak tutar.
+            if (d.getUTCFullYear() < 1910) {
+                const h = d.getUTCHours().toString().padStart(2, "0");
+                const m = d.getUTCMinutes().toString().padStart(2, "0");
                 if (h === "00" && m === "00") return "";
                 return `${h}:${m}`;
             }
-            return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")}.${d.getFullYear()}`;
+            return `${d.getUTCDate().toString().padStart(2, "0")}.${(d.getUTCMonth() + 1).toString().padStart(2, "0")}.${d.getUTCFullYear()}`;
         }
         return String(cell).trim();
     }
@@ -250,6 +257,9 @@ function isGenericSheetName(name: string): boolean {
 
 export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): MatchData[] {
     const allMatches: MatchData[] = [];
+    // Hiç ayrıştırılamayan (maç adı çıkarılamayan) satır sayısı — sessizce yutulmasın diye
+    // dosya sonunda loglanıyor. Bu sayı artıyorsa kaynak dosyanın başlıkları değişmiş olabilir.
+    let skippedUnparsable = 0;
     const category = fileName.replace(/\.(xlsx|xls|csv)$/i, "").replace(/ARŞİV\s*/i, "").trim();
     const fileMeta = parseFileMetadata(fileName);
 
@@ -421,7 +431,16 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                 const extras = row.map((v, j) => ({ v, j })).filter(x => x.v.length > 2 && !usedColsSet.has(x.j)).map(x => x.v).slice(0, 3);
                 if (extras.length > 0) macAdi = extras.join(" - ");
             }
-            if (!macAdi) macAdi = `${category} — ${ws.name}`;
+            // Buraya kadar maç adı bulunamadıysa satır gerçekten ayrıştırılamıyor:
+            // ne takım sütunu eşleşti ne de eşlenmemiş sütunlarda kullanılabilir metin var.
+            // Eskiden son çare olarak `${category} — ${ws.name}` yazılıyordu; bu, maç adı
+            // "ÖZEL LİG VE ÜNİVERSİTE (2026 - 2027) — GÜNCEL" gibi ÇÖP kayıtlar üretiyordu
+            // (2026-10-01'de arşiv dosyasından gelen 61 kayıt böyleydi) ve bu çöp
+            // Ödemeler sayfasına kategori olarak da sızıyordu. Artık satır atlanıyor.
+            if (!macAdi) {
+                skippedUnparsable += 1;
+                continue;
+            }
 
             macAdi = cleanDatePrefix(macAdi);
 
@@ -454,6 +473,9 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                 kaynak_dosya: `${fileName} → ${ws.name}`,
             });
         }
+    }
+    if (skippedUnparsable > 0) {
+        console.warn(`[PARSER] ${fileName}: maç adı çıkarılamayan ${skippedUnparsable} satır atlandı (takım/maç sütunu eşleşmedi).`);
     }
     return allMatches;
 }
