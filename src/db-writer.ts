@@ -41,23 +41,37 @@ const TURKISH_MONTHS: Record<string, string> = {
     "kasim": "11", "aralık": "12", "aralik": "12",
 };
 
+// Makul sezon aralığı dışındaki yıllar reddedilir. Gerçek veride bir satırın tarihi
+// "05.12.22025" yazılmıştı (fazladan 2) — regex `(\d{4})` kısmı "2202"yi yakalayıp
+// tarihi 2202 yılına atıyordu. Böyle bir kayıt hem listelerde geleceğe düşüyor hem de
+// eski sezon temizliğinden kaçıyordu (2026-09-30'da 5 kayıt bulundu).
+const MIN_YEAR = 2015;
+const MAX_YEAR = 2100;
+
+function buildUtcDate(year: string, month: string, day: string): Date | null {
+    const y = parseInt(year, 10);
+    if (y < MIN_YEAR || y > MAX_YEAR) return null;
+    const d = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+    return isNaN(d.getTime()) ? null : d;
+}
+
 export function parseTarihDate(tarih: string): Date | null {
     if (!tarih) return null;
 
-    const numeric = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+    // Yılı tam 4 haneye sınırlıyoruz: `(\d{4})` ucu açık olduğu için "22025" gibi
+    // yazım hatalarında ilk dört haneyi ("2202") yıl sanıyordu.
+    const numeric = tarih.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?!\d)/);
     if (numeric) {
         const [, day, month, year] = numeric;
-        const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00.000Z`);
-        return isNaN(d.getTime()) ? null : d;
+        return buildUtcDate(year, month.padStart(2, "0"), day.padStart(2, "0"));
     }
 
-    const turkish = tarih.match(/(\d{1,2})\s+([a-zçğıöşü]+)\s+(\d{4})/i);
+    const turkish = tarih.match(/(\d{1,2})\s+([a-zçğıöşü]+)\s+(\d{4})(?!\d)/i);
     if (turkish) {
         const [, day, monthName, year] = turkish;
         const month = TURKISH_MONTHS[monthName.toLocaleLowerCase("tr")];
         if (!month) return null;
-        const d = new Date(`${year}-${month}-${day.padStart(2, "0")}T00:00:00.000Z`);
-        return isNaN(d.getTime()) ? null : d;
+        return buildUtcDate(year, month, day.padStart(2, "0"));
     }
 
     return null;

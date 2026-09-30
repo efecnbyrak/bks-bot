@@ -6,6 +6,9 @@ export interface MatchData {
     saat?: string;
     salon?: string;
     kategori: string;
+    // Yerel Lig dosyalarındaki "GRUP" sütunu (ör. "A GRUBU") — kategoriden ayrı.
+    // ParsedMatch'te karşılığı yok; web tarafı Atamalar sayfasında kullanıyor.
+    grup?: string;
     hafta?: number;
     sezon?: string;
     ligTuru: string;
@@ -309,8 +312,15 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                     if (!colMap["saat"]) colMap["saat"] = []; colMap["saat"].push(j);
                 } else if (c.includes("salon") || c.includes("spor")) {
                     if (!colMap["salon"]) colMap["salon"] = []; colMap["salon"].push(j);
-                } else if (c.includes("organizasyon") || c === "org") {
+                } else if (c.includes("organizasyon") || c === "org" || c.includes("kategori")) {
+                    // Yerel Lig haftalık dosyalarında bu sütunun başlığı "KATEGORİ"
+                    // (ör. "U16EA"), Özel Lig dosyalarında "ORGANİZASYON". Alias
+                    // eklenmeden önce KATEGORİ tanınmıyordu ve `kategori` alanına sekme
+                    // adı ("1 hafta") yazılıyordu — 808 maçın tamamı böyleydi (2026-09-30).
                     if (!colMap["organizasyon"]) colMap["organizasyon"] = []; colMap["organizasyon"].push(j);
+                } else if (c.includes("grup")) {
+                    // "GRUP" (ör. "A GRUBU") — kategoriden AYRI sütun, kategori yerine geçmez.
+                    if (!colMap["grup"]) colMap["grup"] = []; colMap["grup"].push(j);
                 } else if (c.includes("maç") || c.includes("karşılaşma") || c.includes("müsabaka") || c.includes("takım") || c.includes("ev sahibi")) {
                     if (!colMap["mac"]) colMap["mac"] = []; colMap["mac"].push(j);
                 } else if (c.includes("istatistik") || c.includes("stat")) {
@@ -356,10 +366,12 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
         const salonCols = colMap["salon"] || [];
         const macCols = colMap["mac"] || [];
         const organizasyonCols = colMap["organizasyon"] || [];
+        const grupCols = colMap["grup"] || [];
 
         const usedColsSet = new Set([
             ...hakemCols, ...masaCols, ...saglikCols, ...istatistikCols,
             ...gozlemciCols, ...sahaKomiseriCols, ...tarihCols, ...saatCols, ...salonCols, ...macCols,
+            ...organizasyonCols, ...grupCols,
         ]);
 
         let lastTarih = "";
@@ -430,9 +442,13 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                 if (orgVal.length > 1) rowKategori = orgVal;
             }
 
+            let rowGrup = "";
+            if (grupCols.length) rowGrup = (row[grupCols[0]] || "").trim();
+
             allMatches.push({
                 mac_adi: macAdi, tarih, saat, salon,
-                kategori: rowKategori, hafta: fileMeta.hafta, ligTuru: fileMeta.ligTuru,
+                kategori: rowKategori, grup: rowGrup || undefined,
+                hafta: fileMeta.hafta, ligTuru: fileMeta.ligTuru,
                 hakemler, masa_gorevlileri: masaGorevlileri, saglikcilar, istatistikciler, gozlemciler,
                 sahaKomiserleri,
                 kaynak_dosya: `${fileName} → ${ws.name}`,

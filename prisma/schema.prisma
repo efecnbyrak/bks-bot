@@ -590,11 +590,15 @@ model GameAssignment {
   saglikci          String?
   istatistikci1     String?
   istatistikci2     String?
+  // bks-web-system ile senkron (2026-09-30): kaynak E-Tablo satır sırası.
+  // Bot bu tabloya hiç dokunmaz, yalnızca şema senkronu için burada.
+  sortIndex         Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([tarih])
   @@index([tarih, aTeam, bTeam])
+  @@index([sortIndex])
   @@map("game_assignments")
 }
 

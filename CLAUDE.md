@@ -84,6 +84,32 @@ hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullan
 — aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Detay:
 `bks-web-system/docs/bot/YAPILACAKLAR.md` TAMAMLANANLAR.
 
+## Sütun Başlığı Eşlemesi — Tanınmayan Başlık = Sessiz Veri Kaybı (2026-09-30)
+
+`src/lib/match-parser.ts` sütunları BAŞLIK METNİNE göre eşliyor (`colMap`). Bir başlık
+tanınmazsa o sütunun verisi sessizce kaybolur. Gerçek bir örnek: Yerel Lig haftalık
+dosyalarında kategori sütununun başlığı `KATEGORİ` (ör. "U16EA"), Özel Lig dosyalarında
+`ORGANİZASYON`. Alias sadece `organizasyon`/`org` olduğu için `KATEGORİ` tanınmıyor ve
+`rowKategori` SEKME ADINA ("1 hafta") düşüyordu — DB'deki 808 Yerel Lig maçının tamamı
+böyle yazılmıştı. Ayrı bir `GRUP` sütunu ("A GRUBU") da tamamen kayboluyordu.
+
+Artık `kategori` ve `grup` başlıkları tanınıyor; `grup` ayrı bir alan
+(`MatchData.grup`, ParsedMatch'te tutulmaz — web tarafı `GameAssignment.grup`'a yazıyor).
+
+**Yeni bir kaynak dosya formatı geldiğinde başlıkları TAHMİN ETME.** Web reposundaki
+`scripts/inspect-drive-headers.ts` (salt okuma) gerçek başlık satırını yazdırır:
+`npx tsx --env-file=.env.local scripts/inspect-drive-headers.ts "5.HAFTA"`.
+Bu dosya web reposundaki `lib/match-parser.ts` ile BİREBİR aynı olmalı — alias
+değişikliği iki repoda aynı turda yapılır.
+
+## `parseTarihDate` Yıl Sınırı (2026-09-30)
+
+Yıl 2015-2100 aralığına sınırlı ve regex `(\d{4})(?!\d)` ile tam dört haneye bağlı.
+Gerçek veride bir satırın tarihi "05.12.22025" yazılmıştı; eski regex ilk dört haneyi
+("2202") yıl sanıp kaydı 2202 yılına atıyordu. Böyle kayıtlar hem listelerde geleceğe
+düşüyor hem de web'in eski sezon temizliğinden kaçıyordu (kesim tarihinden BÜYÜK
+oldukları için). Aralık dışı yıl artık `null` döndürür.
+
 ## Sezon Kesim Filtresi — Eski Maçlar Bir Daha YAZILMAZ (2026-09-30'da eklendi)
 
 Web tarafında Süper Admin → Ayarlar'dan eski sezon verisi kalıcı silinebiliyor
