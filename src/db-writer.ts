@@ -625,9 +625,21 @@ export async function detectAndMarkCancelledMatches(
                 // eskisini sil, yenisini bırak. Yoksa eskiyi hedefe taşı.
                 const dupe = await db.userMatchAssignment.findUnique({
                     where: { userId_matchId: { userId: d.userId, matchId: d.toMatchId! } },
-                    select: { id: true },
+                    select: { id: true, paidAt: true },
                 });
                 if (dupe) {
+                    // Eski satır silinirken kullanıcının "ödendi" işareti kaybolmasın
+                    // (2026-09-30) — hedef satırda işaret yoksa eskisinden taşınır.
+                    const stale = await db.userMatchAssignment.findUnique({
+                        where: { userId_matchId: { userId: d.userId, matchId: d.fromMatchId } },
+                        select: { paidAt: true },
+                    });
+                    if (!dupe.paidAt && stale?.paidAt) {
+                        await db.userMatchAssignment.update({
+                            where: { userId_matchId: { userId: d.userId, matchId: d.toMatchId! } },
+                            data: { paidAt: stale.paidAt },
+                        });
+                    }
                     await db.userMatchAssignment.delete({
                         where: { userId_matchId: { userId: d.userId, matchId: d.fromMatchId } },
                     });

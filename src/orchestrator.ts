@@ -10,9 +10,10 @@ import {
     detectAndMarkCancelledMatches,
     CancelledMatchInfo,
     ShiftedAssignmentInfo,
+    parseTarihDate,
 } from "./db-writer";
 import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
-import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync, getSeasonKeyForFolder } from "./config";
+import { getFolderConfig, getFolderIdString, getSyncMode, isForceSync, getSeasonKeyForFolder, getSeasonCutoffDate } from "./config";
 import { logger } from "./logger";
 import { db } from "./db";
 
@@ -135,13 +136,42 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
                 const workbook = new ExcelJSRuntime.Workbook();
                 await workbook.xlsx.load(new Uint8Array(buffer) as any);
 
-                const matches = parseWorkbook(workbook as any, file.name);
+                let matches = parseWorkbook(workbook as any, file.name);
 
                 logger.info("Parse tamamlandı", { fileName: file.name, matchCount: matches.length });
 
                 // DB'ye dosya kaydını yaz/güncelle
                 const driveFileDbId = await upsertDriveFile(file, folderKey, matches.length);
 
+                if (matches.length === 0) continue;
+
+                // SEZON KESİMİ (2026-09-30): sezon başlangıcından önceki maçlar DB'ye
+                // hiç yazılmaz. Web tarafı Ayarlar'dan eski sezon verisini kalıcı
+                // silebiliyor (bks-web-system → lib/matches/season-purge.ts); bu filtre
+                // olmadan silinen kayıtlar bir sonraki senkronda geri geliyordu
+                // (özellikle SYNC_MODE=archive-full veya güncel klasörde dosya değişince).
+                // Kesim tarihi web ile ORTAK ayardan (SEASON_START_DATE) okunuyor.
+                //
+                // Filtre BURADA, upsert'ten önce yapılıyor — aşağıdaki buildUserAssignments
+                // `matches[i]` ile `matchIds[i]`'i indeks indeks eşliyor, listeyi db-writer
+                // içinde süzmek bu hizayı bozardı.
+                //
+                // tarihi ayrıştırılamamış satırlar (tarihDate = null) BİLEREK tutuluyor:
+                // veri kaybetmek, fazladan bir satır tutmaktan daha kötü.
+                const seasonCutoff = await getSeasonCutoffDate();
+                const beforeCutoffCount = matches.length;
+                matches = matches.filter(m => {
+                    const d = parseTarihDate(m.tarih);
+                    return !(d && d < seasonCutoff);
+                });
+                const skippedOldSeason = beforeCutoffCount - matches.length;
+                if (skippedOldSeason > 0) {
+                    logger.info("Sezon kesimi öncesi maçlar atlandı", {
+                        fileName: file.name,
+                        cutoff: seasonCutoff.toISOString().slice(0, 10),
+                        skipped: skippedOldSeason,
+                    });
+                }
                 if (matches.length === 0) continue;
 
                 // Maçları yaz — sezon alanına folderKey'in kendisi değil, ondan çözülen

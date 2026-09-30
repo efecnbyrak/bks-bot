@@ -84,6 +84,43 @@ hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullan
 — aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Detay:
 `bks-web-system/docs/bot/YAPILACAKLAR.md` TAMAMLANANLAR.
 
+## Sezon Kesim Filtresi — Eski Maçlar Bir Daha YAZILMAZ (2026-09-30'da eklendi)
+
+Web tarafında Süper Admin → Ayarlar'dan eski sezon verisi kalıcı silinebiliyor
+(`bks-web-system/lib/matches/season-purge.ts`). Bot hiçbir tarih filtresi uygulamadığı
+için silinen bu maçlar bir sonraki senkronda geri geliyordu — özellikle
+`sync-archives-once.yml` (`SYNC_MODE=archive-full`) elle çalıştırılınca, ya da
+`current`/`latest-season` klasöründeki bir dosya değişince ve içinde eski tarihli satırlar
+olduğunda.
+
+Artık `src/orchestrator.ts`, dosyayı parse ettikten HEMEN SONRA
+`getSeasonCutoffDate()` (`src/config.ts`) ile kesim tarihinden önceki maçları listeden
+atıyor ve kaç tanesini attığını logluyor. Kesim tarihi web ile **ORTAK** ayardan
+(`SystemSetting.SEASON_START_DATE`) okunuyor; ayar yoksa takvime (Ağustos 1) fail-open
+düşülüyor. Yani "Ayarlar'daki sezon başlangıcı" iki repo için tek gerçek kaynak: web neyi
+siliyorsa bot onu bir daha yazmıyor.
+
+**Filtre bilinçli olarak orchestrator'da, `db-writer.ts` içinde DEĞİL.**
+`buildUserAssignments(matches, matchIds)` (`src/user-matcher.ts`) iki listeyi indeks
+indeks eşliyor — süzmeyi `upsertParsedMatches` içine indirmek bu hizayı bozar ve
+atamalar yanlış maçlara bağlanır. Yeni bir filtre eklenecekse aynı yere eklenmeli.
+
+`tarihDate === null` satırlar (tarihi ayrıştırılamamış) BİLEREK yazılmaya devam ediyor:
+veri kaybetmek, fazladan bir satır tutmaktan daha kötü.
+
+## `UserMatchAssignment.paidAt` — Bot ASLA Yazmaz (2026-09-30'da eklendi)
+
+Kullanıcının "bu maçın ücreti ödendi" işareti. Bot bu alana **hiç yazmaz** —
+`upsertUserMatchAssignment`'ın `update` payload'ında yok (`role`, `nameInSpreadsheet`
+sadece). Ama duplicate birleştirme yolları atama satırını SİLİYOR:
+
+- `src/db-writer.ts` → `ROW_SHIFTED` dalı
+- `src/lib/contentkey-consolidator.ts` → `MOVE` / race-dupe dalı
+
+Bu iki yerde silinen kaydın `paidAt`'i kalan kayda taşınıyor (hedefte işaret yoksa).
+Yeni bir dedupe/silme yolu eklenirse **aynı taşımayı yapmak zorunlu** — aksi halde
+kullanıcı kendi işaretini sessizce kaybeder.
+
 ## Tarih Ayrıştırma (`parseTarihDate`) — Türkçe Uzun Format (2026-09-29'da eklendi)
 
 `src/db-writer.ts` → `parseTarihDate()` artık hem sayısal `DD.MM.YYYY` hem de uzun Türkçe

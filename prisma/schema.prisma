@@ -233,9 +233,14 @@ model UserMatchAssignment {
   match             ParsedMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
+  // Kullanıcının "ödendi" işareti (bks-web-system ile senkron, 2026-09-30).
+  // BOT BU ALANA ASLA YAZMAZ — upsert'in update payload'ında yok. Duplicate
+  // birleştirmede (dedupe) kaybolmaması için taşınır, bkz. db-writer/contentkey-consolidator.
+  paidAt            DateTime?
 
   @@unique([userId, matchId])
   @@index([userId])
+  @@index([userId, paidAt])
   @@map("user_match_assignments")
 }
 
@@ -633,6 +638,7 @@ model RolePermission {
   canAddPenalty         Boolean  @default(true)
   canDeletePenalty      Boolean  @default(true)
   canEditPenalty        Boolean  @default(true)
+  canManagePayments     Boolean  @default(false)
   updatedAt             DateTime @updatedAt
 
   @@map("role_permissions")

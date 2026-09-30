@@ -55,11 +55,13 @@ export function getCurrentSeasonKey(date: Date = new Date()): string {
 
 // bks-web-system tarafında Süper Admin → Ayarlar'dan sezon başlangıç/bitiş
 // tarihi elle girilebiliyor (SystemSetting: SEASON_START_DATE/SEASON_END_DATE,
-// aynı DB'yi paylaşıyoruz). Girilmişse sezon anahtarı ("2026-2027" gibi) o
-// tarihlerden hesaplanır — sezon takvimin dışında bir tarihte açılırsa (örn.
-// 20 Kasım) admin panelden tek bir yerden değiştirilebilsin diye. Boş/geçersizse
-// mevcut Ağustos-başlangıçlı takvim hesabına (getCurrentSeasonKey) fail-open
-// düşülür.
+// aynı DB'yi paylaşıyoruz). Sadece başlangıç girilmişse sezon "açık uçlu"
+// sayılır (sezonun ne zaman biteceği baştan belli olmuyor, bitiş zorunlu
+// değil, 2026-09-30) — sezon anahtarı ("2026-2027" gibi) başlangıç+1 yıl
+// olarak hesaplanır. Bitiş de girilmişse onun yılı kullanılır. Başlangıç da
+// boşsa mevcut Ağustos-başlangıçlı takvim hesabına (getCurrentSeasonKey)
+// fail-open düşülür. Web tarafıyla (lib/matches/season.ts) aynı davranış —
+// drift olmasın diye UTC yıl kullanılıyor (web de ISO/UTC tarih saklıyor).
 async function getSeasonOverride(): Promise<{ startYear: number; endYear: number } | null> {
     try {
         const { db } = await import("./db");
@@ -68,17 +70,51 @@ async function getSeasonOverride(): Promise<{ startYear: number; endYear: number
         });
         const startRaw = rows.find(r => r.key === "SEASON_START_DATE")?.value;
         const endRaw = rows.find(r => r.key === "SEASON_END_DATE")?.value;
-        if (startRaw && endRaw) {
+        if (startRaw) {
             const startDate = new Date(startRaw);
-            const endDate = new Date(endRaw);
-            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-                return { startYear: startDate.getFullYear(), endYear: endDate.getFullYear() };
+            if (!isNaN(startDate.getTime())) {
+                const startYear = startDate.getUTCFullYear();
+                if (endRaw) {
+                    const endDate = new Date(endRaw);
+                    if (!isNaN(endDate.getTime())) {
+                        return { startYear, endYear: endDate.getUTCFullYear() };
+                    }
+                } else {
+                    return { startYear, endYear: startYear + 1 };
+                }
             }
         }
     } catch (e) {
         console.error("[CONFIG] SystemSetting okunamadı, takvim hesabına düşülüyor:", e);
     }
     return null;
+}
+
+// Sezon KESİM TARİHİ: bu tarihten önceki maçlar DB'ye hiç yazılmaz (2026-09-30).
+// Web tarafında Süper Admin → Ayarlar'dan eski sezon verisi kalıcı silinebiliyor
+// (bks-web-system → lib/matches/season-purge.ts). Bot hiçbir tarih filtresi
+// uygulamadığı için, silinen eski maçlar bir sonraki senkronda (özellikle
+// SYNC_MODE=archive-full veya güncel klasördeki bir dosya değişince) geri geliyordu.
+// Artık aynı SEASON_START_DATE ayarı iki tarafta da tek gerçek kaynak: web neyi
+// siliyorsa bot onu bir daha yazmıyor.
+//
+// Ayar girilmemişse takvime (Ağustos 1) fail-open düşülür.
+export async function getSeasonCutoffDate(date: Date = new Date()): Promise<Date> {
+    try {
+        const { db } = await import("./db");
+        const row = await db.systemSetting.findUnique({ where: { key: "SEASON_START_DATE" } });
+        if (row?.value) {
+            const parsed = new Date(row.value);
+            if (!isNaN(parsed.getTime())) return parsed;
+        }
+    } catch (e) {
+        console.error("[CONFIG] SEASON_START_DATE okunamadı, takvim kesimine düşülüyor:", e);
+    }
+
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const startYear = month >= SEASON_START_MONTH ? year : year - 1;
+    return new Date(Date.UTC(startYear, SEASON_START_MONTH - 1, 1));
 }
 
 export async function resolveCurrentSeasonKey(date: Date = new Date()): Promise<string> {

@@ -312,9 +312,18 @@ export async function consolidateActiveContentKeyDuplicates(opts: {
                     // Hedefte aynı userId_matchId var mı? (teorik guard — canonicalUserIds zaten eledi)
                     const dupe = await db.userMatchAssignment.findUnique({
                         where: { userId_matchId: { userId: mv.userId, matchId: p.canonicalRowId } },
-                        select: { id: true },
+                        select: { id: true, paidAt: true },
                     });
                     if (dupe && dupe.id !== mv.assignmentId) {
+                        // Silinen kopyanın "ödendi" işareti kalan satıra taşınır (2026-09-30) —
+                        // kullanıcı işaretini duplicate temizliği yüzünden kaybetmesin.
+                        const stale = await db.userMatchAssignment.findUnique({
+                            where: { id: mv.assignmentId },
+                            select: { paidAt: true },
+                        });
+                        if (!dupe.paidAt && stale?.paidAt) {
+                            await db.userMatchAssignment.update({ where: { id: dupe.id }, data: { paidAt: stale.paidAt } });
+                        }
                         await db.userMatchAssignment.delete({ where: { id: mv.assignmentId } });
                         undoLog.push({ assignmentId: mv.assignmentId, userId: mv.userId, oldMatchId: mv.fromRowId, newMatchId: null, action: "DELETED (race dupe)" });
                     } else {
