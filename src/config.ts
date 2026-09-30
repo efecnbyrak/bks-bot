@@ -53,6 +53,40 @@ export function getCurrentSeasonKey(date: Date = new Date()): string {
     return `${startYear}-${startYear + 1}`;
 }
 
+// bks-web-system tarafında Süper Admin → Ayarlar'dan sezon başlangıç/bitiş
+// tarihi elle girilebiliyor (SystemSetting: SEASON_START_DATE/SEASON_END_DATE,
+// aynı DB'yi paylaşıyoruz). Girilmişse sezon anahtarı ("2026-2027" gibi) o
+// tarihlerden hesaplanır — sezon takvimin dışında bir tarihte açılırsa (örn.
+// 20 Kasım) admin panelden tek bir yerden değiştirilebilsin diye. Boş/geçersizse
+// mevcut Ağustos-başlangıçlı takvim hesabına (getCurrentSeasonKey) fail-open
+// düşülür.
+async function getSeasonOverride(): Promise<{ startYear: number; endYear: number } | null> {
+    try {
+        const { db } = await import("./db");
+        const rows = await db.systemSetting.findMany({
+            where: { key: { in: ["SEASON_START_DATE", "SEASON_END_DATE"] } },
+        });
+        const startRaw = rows.find(r => r.key === "SEASON_START_DATE")?.value;
+        const endRaw = rows.find(r => r.key === "SEASON_END_DATE")?.value;
+        if (startRaw && endRaw) {
+            const startDate = new Date(startRaw);
+            const endDate = new Date(endRaw);
+            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                return { startYear: startDate.getFullYear(), endYear: endDate.getFullYear() };
+            }
+        }
+    } catch (e) {
+        console.error("[CONFIG] SystemSetting okunamadı, takvim hesabına düşülüyor:", e);
+    }
+    return null;
+}
+
+export async function resolveCurrentSeasonKey(date: Date = new Date()): Promise<string> {
+    const override = await getSeasonOverride();
+    if (override) return `${override.startYear}-${override.endYear}`;
+    return getCurrentSeasonKey(date);
+}
+
 // folderKey ("current", "latest-season" veya doğrudan sezon adı) ile o klasörün
 // GERÇEK sezon adı ("2026-2027" gibi) arasındaki eşleşmeyi tutar. ParsedMatch.sezon
 // alanına folderKey'in kendisi DEĞİL, buradan çözülen gerçek sezon adı yazılmalı —
@@ -82,7 +116,7 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
         if (key === "current") {
             // DRIVE_FOLDERS["current"] statik tanımlı olduğu için aşağıdaki genel
             // "zaten kayıtlı" kontrolüyle atlanır — gerçek sezon adı burada ayrıca set edilir.
-            FOLDER_SEASON_KEYS["current"] = getCurrentSeasonKey();
+            FOLDER_SEASON_KEYS["current"] = await resolveCurrentSeasonKey();
         }
         if (DRIVE_FOLDERS[key]) continue;
         if (key === "latest-season") {
@@ -91,7 +125,7 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
 
             // Önce tarihe göre hesaplanan sezonu ara (örn. bugün Ağustos 2026 ise "2026-2027").
             // Klasör henüz oluşturulmamışsa (federasyon geç açtıysa) Drive'daki en güncel yıla düş.
-            const expectedKey = getCurrentSeasonKey();
+            const expectedKey = await resolveCurrentSeasonKey();
             const exact = seasonCache.find(s => s.key === expectedKey);
             const chosen = exact ?? seasonCache.reduce((a, b) => (b.year > a.year ? b : a));
 

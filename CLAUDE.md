@@ -70,6 +70,20 @@ anahtarla geri gelir. Web tarafı artık `sezon` string'ine filtrelemede hiç
 güvenmiyor (takvime göre filtreliyor) ama alan hâlâ UI'da ham gösterim için
 kullanılıyor, o yüzden doğru değer yazmak önemini koruyor.
 
+## Sezon Anahtarı Admin-Ayarlanabilir (2026-09-30'da eklendi)
+
+`getCurrentSeasonKey()` (`src/config.ts`) hâlâ var (takvim tabanlı, Ağustos başlangıçlı
+fallback) ama artık doğrudan çağrılmıyor — onun yerine `resolveCurrentSeasonKey()`
+kullanılıyor. Bu fonksiyon önce web reposuyla paylaşılan `SystemSetting` tablosundan
+(`SEASON_START_DATE`/`SEASON_END_DATE`, web tarafında Süper Admin → Ayarlar'dan
+elle giriliyor) okumayı dener; ikisi de doluysa sezon etiketini oradan hesaplar,
+boş/geçersizse `getCurrentSeasonKey()`'e fail-open düşer. `resolveSyncFolderKeys()`
+içindeki iki çağrı noktası (`current` klasörü + `latest-season` beklenen anahtar
+tespiti) `resolveCurrentSeasonKey()`'e geçirildi. **Yeni bir yerde sezon anahtarı
+hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullanılmalı**
+— aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Detay:
+`bks-web-system/docs/bot/YAPILACAKLAR.md` TAMAMLANANLAR.
+
 ## Tarih Ayrıştırma (`parseTarihDate`) — Türkçe Uzun Format (2026-09-29'da eklendi)
 
 `src/db-writer.ts` → `parseTarihDate()` artık hem sayısal `DD.MM.YYYY` hem de uzun Türkçe
