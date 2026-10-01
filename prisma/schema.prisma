@@ -190,6 +190,11 @@ model ParsedMatch {
   hafta           Int?
   sezon           String?
   ligTuru         String
+
+  // bks-web-system ile şema senkronu — bot artık bunu dolduruyor (db-writer.ts),
+  // db:push her zaman web reposundan yapılır, burada sadece generate için tanımlı.
+  grup            String?
+
   hakemler        String[]
   masaGorevlileri String[]
   saglikcilar     String[]
