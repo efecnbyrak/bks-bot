@@ -310,6 +310,28 @@ Yeni bir mükerrer deseni çıkarsa: önce hangi alanın `contentKey`'i değişt
 script yaz — **genel bir "slot bazlı hepsini birleştir" yaklaşımından kaçın** (aynı salonda
 peş peşe maç yöneten ekipler yüksek kadro örtüşmesi üretir, yanlış pozitif riski yüksek).
 
+## Ceza Sorgulama Tabloları — Bot ASLA Dokunmaz (2026-10-03'te eklendi)
+
+Web tarafında Saha Komiserlerine özel bir **Ceza Sorgulama** sayfası var. Verisi iki
+Google E-Tablo'dan geliyor: *CEZA KARARLARI* ve *ANTRENÖR OLMADAN SAHAYA ÇIKAN TAKIMLAR*.
+Üç yeni tablo kullanılıyor: `DisciplinaryRecord`, `CoachlessTeamRecord`,
+`DisciplinarySyncState` (şemada var çünkü şema tek kaynak web'de).
+
+**Bu üç tabloya BKS-BOT ASLA YAZMAZ ve okumaz.** Senkronu web tarafı yapıyor
+(`app/api/cron/sync-discipline` → `lib/discipline/sync.ts`, saatlik).
+
+**Neden bot değil de web** (gelecekte "bunu bot yapsa daha mantıklı değil mi?" sorusu
+çıkarsa cevabı burada): bot'un Google kimliği bir **servis hesabı** ve scope'u yalnızca
+`drive.readonly` (`src/lib/google-drive.ts`) — Sheets API'yi hiç kullanmıyor, repoda
+`spreadsheets.values.get` çağrısı yok. Web'in OAuth hattı ise `spreadsheets` scope'una
+sahip ve 2026-10-03'te iki dosyayı da okuyabildiği **canlı olarak doğrulandı**. Veri çok
+küçük (56 + 12 satır), bot'un ağır Drive/xlsx hattına taşımanın bir faydası yok; taşımak
+yeni scope, yeni entry point ve yeni bir dış tetikleyici kurulumu demek olurdu.
+
+**Yani:** bu özellik için bu repoda yapılacak hiçbir iş yok. Şema değişikliği de
+gerekmiyor — bot kodu bu modellere hiç referans vermiyor (checklist adım 1'in testi:
+`grep "prisma.disciplinary"` → 0 sonuç).
+
 ## Git Push Kuralları
 
 - Push öncesi kullanıcıya kısa bir onay sorusu sor.
