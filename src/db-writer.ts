@@ -22,9 +22,16 @@ export function computeMatchKey(match: MatchData): string {
 
 // Hakemler/masa dahil etmeden maç kimliğini hashler.
 // Aynı maçın farklı dosyalara (arşiv dahil) taşınıp taşınmadığını tespit etmek için kullanılır.
+// Salon BİLEREK anahtara dahil DEĞİL: federasyon salonu bazı dosyalarda (ör.
+// TBF-FIBA-MİLLİ) sonradan giriyor, salon anahtara dahilken salon dolduğu anda
+// aynı maç yeni bir contentKey alıyor, kullanıcının atandığı eski (salonsuz) satır
+// "dosyada yok" sanılıp yanlış iade adayı üretiliyordu (2026-10-05, madde 10) — bu
+// yüzden o dosyada iade tespiti FAZ 1 sigortası tarafından tamamen bloke oluyordu.
+// Web tarafındaki ikiz (`lib/matches/match-utils.ts` → `contentKey`) AYNI turda
+// değişti — biri değişirse diğeri de değişmek zorunda.
 export function computeContentKey(match: MatchData): string {
     const norm = (s: string) => (s ?? "").trim().toLowerCase();
-    const raw = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}|${norm(match.salon ?? "")}`;
+    const raw = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}`;
     return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
 }
 

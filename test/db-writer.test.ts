@@ -66,6 +66,12 @@ describe("computeContentKey", () => {
         const b = makeMatch({ tarih: "24.08.2026" });
         assert.notEqual(computeContentKey(a), computeContentKey(b));
     });
+
+    test("salon değişse/sonradan dolsa da içerik anahtarı aynı kalır (madde 10)", () => {
+        const a = makeMatch({ salon: "" });
+        const b = makeMatch({ salon: "DARÜŞŞAFAKA AYHAN ŞAHENK SPOR SALONU" });
+        assert.equal(computeContentKey(a), computeContentKey(b));
+    });
 });
 
 describe("evaluateCancellationSafety (FAZ 1 sigortası)", () => {
