@@ -152,10 +152,24 @@ export async function upsertParsedMatches(
         const keys = batch.map(r => r.matchKey);
         const existing = await db.parsedMatch.findMany({
             where: { matchKey: { in: keys } },
-            select: { id: true, matchKey: true },
+            select: { id: true, matchKey: true, cancelledAt: true },
         });
         const existingKeys = new Set(existing.map((e: { matchKey: string }) => e.matchKey));
         const toUpdate = batch.filter(r => existingKeys.has(r.matchKey));
+
+        // İPTALİ GERİ AÇMA (2026-10-05): matchKey kadroyu da hashliyor, yani bu satırın
+        // kadrosu dosyanın ŞU ANKİ hâlinde birebir duruyor demektir — o hâlde satır
+        // gerçek, iptal işareti yanlış kalmış. Eskiden iptal hiç geri alınmıyordu;
+        // bir kez yanlış tarafa iptal konduğunda (bkz. kanonik satır seçimi) satır
+        // sonsuza dek ölü kalıyor, iade tespiti de onu hiç görmüyordu.
+        // İade edilmiş satırlar bundan etkilenmez: iade sonrası kadro değiştiği için
+        // o satırın matchKey'i artık dosyada bulunmaz.
+        const reopened = existing.filter((e: { cancelledAt: Date | null }) => e.cancelledAt !== null);
+        if (reopened.length > 0) {
+            logger.info("Dosyada hâlâ var olan iptalli satırların iptali geri alındı", {
+                count: reopened.length, ids: reopened.map((e: { id: number }) => e.id).slice(0, 20),
+            });
+        }
 
         if (toUpdate.length > 0) {
             const UPDATE_BATCH = 5;
@@ -184,6 +198,8 @@ export async function upsertParsedMatches(
                             sahaKomiserleri: r.sahaKomiserleri,
                             kaynakDosya: r.kaynakDosya,
                             driveFileId: r.driveFileId,
+                            cancelledAt: null,
+                            cancelReason: null,
                         },
                     })
                 ));
@@ -357,12 +373,18 @@ export interface AssignmentDecisionInput {
     }[];
     // contentKey → o maça ait TÜM aktif ParsedMatch satırları (id + parse edilmiş MatchData).
     // Aynı contentKey'den birden fazla satır olabilir (kademeli doldurma / dosya revizyonu) — hepsi burada.
-    activeRowsByContentKey: Map<string, { id: number; data: MatchData }[]>;
+    // Satırın matchKey'i de taşınır: "bu satır dosyanın ŞU ANKİ hâlinde var mı"
+    // sorusunu ancak bununla cevaplayabiliyoruz (bkz. currentFileMatchKeys).
+    activeRowsByContentKey: Map<string, { id: number; matchKey?: string; data: MatchData }[]>;
     // Şu an İŞLENEN dosyada bulunan contentKey'ler. Bir atamanın contentKey'i burada yoksa,
     // maç bu dosyadan çıkmış demektir — ya iade edilmiş ya da başka dosyaya taşınmış.
     currentFileContentKeys: Set<string>;
     // Bu dosyada bulunmayan ama başka aktif dosyada bulunan contentKey'ler (arşive/revizyona taşınma).
     movedContentKeys: Set<string>;
+    // Dosyanın ŞU ANKİ hâlinde fiilen bulunan satırların matchKey'leri. matchKey kadroyu
+    // da hashlediği için bu küme "federasyonun en son yazdığı kadro hangi satır" sorusunun
+    // tek güvenilir cevabı. Verilmezse eski (yalnızca kalabalığa bakan) davranışa düşülür.
+    currentFileMatchKeys?: Set<string>;
 }
 
 export interface AssignmentDecision {
@@ -449,13 +471,31 @@ export function decideAssignmentOutcomes(input: AssignmentDecisionInput): Assign
             continue;
         }
 
-        // Federasyonun son hâli = o maçın kadrosu EN DOLU aktif satırı (kanonik satır).
         const personCount = (d: MatchData) =>
             d.hakemler.length + d.masa_gorevlileri.length + d.saglikcilar.length +
             d.istatistikciler.length + d.gozlemciler.length + d.sahaKomiserleri.length;
-        const canonical = activeRows.reduce((best, r) =>
-            personCount(r.data) > personCount(best.data) ? r : best
-        );
+
+        // Federasyonun son hâli = DOSYADA ŞU AN BULUNAN satır. Eskiden kanonik satır
+        // sadece "kadrosu en kalabalık aktif satır" olarak seçiliyordu; bir hakem
+        // DEĞİŞTİRİLDİĞİNDE (çıkarılan yerine başkası yazıldığında) iki satırın kişi
+        // sayısı eşit kalıyor, `>` karşılaştırması eşitlikte ilk satırı koruduğu için
+        // DB'den önce gelen ESKİ (artık dosyada olmayan) satır kanonik sayılıyordu.
+        // Sonuç: federasyonun yeni kadrosu "Kadro güncellendi" diye iptal ediliyor,
+        // çıkarılan kişi eski satırda sonsuza dek KEPT kalıyordu — yani iade ettiği maç
+        // ekranında durmaya devam ediyordu (27 satır, 2026-10-05'te tespit edildi).
+        const rowsInFile = input.currentFileMatchKeys && input.currentFileMatchKeys.size > 0
+            ? activeRows.filter(r => r.matchKey && input.currentFileMatchKeys!.has(r.matchKey))
+            : [];
+        const pool = rowsInFile.length > 0 ? rowsInFile : activeRows;
+
+        // Aynı havuzda hâlâ birden fazla satır varsa (kadro kademeli dolduruluyor) en
+        // kalabalığı; kişi sayısı da eşitse DAHA YENİ satır (büyük id) kazanır.
+        const canonical = pool.reduce((best, r) => {
+            const diff = personCount(r.data) - personCount(best.data);
+            if (diff > 0) return r;
+            if (diff === 0 && r.id > best.id) return r;
+            return best;
+        });
         const inCanonical = personIsInMatch(a.nameInSpreadsheet, a.firstName, a.lastName, canonical.data);
 
         if (inCanonical) {
@@ -486,10 +526,13 @@ export async function detectAndMarkCancelledMatches(
     driveFileDbId: number,
     currentMatches: MatchData[]
 ): Promise<CancellationScanResult> {
-    // Bu dosyadaki maçların contentKey'leri (arşive taşınma kontrolü için)
+    // Bu dosyadaki maçların contentKey'leri (arşive taşınma kontrolü için) ve
+    // matchKey'leri (kadro dahil — hangi satırın güncel olduğunu seçmek için).
     const currentContentKeys = new Set<string>();
+    const currentMatchKeys = new Set<string>();
     for (const m of currentMatches) {
         currentContentKeys.add(computeContentKey(m));
+        currentMatchKeys.add(computeMatchKey(m));
     }
 
     // Bu dosyaya atanmış, henüz iptal edilmemiş kullanıcı atamalarını al —
@@ -536,7 +579,7 @@ export async function detectAndMarkCancelledMatches(
         ? await db.parsedMatch.findMany({
               where: { contentKey: { in: touchedContentKeys }, cancelledAt: null },
               select: {
-                  id: true, contentKey: true, driveFileId: true,
+                  id: true, matchKey: true, contentKey: true, driveFileId: true,
                   macAdi: true, tarih: true, saat: true, salon: true, kategori: true,
                   hafta: true, sezon: true, ligTuru: true, kaynakDosya: true,
                   hakemler: true, masaGorevlileri: true, saglikcilar: true,
@@ -555,11 +598,11 @@ export async function detectAndMarkCancelledMatches(
     });
 
     // contentKey → o maça ait tüm aktif satırlar { id, data }
-    const activeRowsByContentKey = new Map<string, { id: number; data: MatchData }[]>();
+    const activeRowsByContentKey = new Map<string, { id: number; matchKey?: string; data: MatchData }[]>();
     for (const r of activeRowsRaw) {
         if (!r.contentKey) continue;
         const arr = activeRowsByContentKey.get(r.contentKey) ?? [];
-        arr.push({ id: r.id, data: rowToMatchData(r) });
+        arr.push({ id: r.id, matchKey: r.matchKey, data: rowToMatchData(r) });
         activeRowsByContentKey.set(r.contentKey, arr);
     }
     const activeRowDataById = new Map<number, MatchData>(activeRowsRaw.map(r => [r.id, rowToMatchData(r)]));
@@ -598,6 +641,7 @@ export async function detectAndMarkCancelledMatches(
         activeRowsByContentKey,
         currentFileContentKeys: currentContentKeys,
         movedContentKeys,
+        currentFileMatchKeys: currentMatchKeys,
     });
 
     // --- UYGULAMA ---

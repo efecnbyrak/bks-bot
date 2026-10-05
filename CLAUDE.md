@@ -229,8 +229,22 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
 - **İptal/güncelleme kararı asla tek bir satıra bakılarak verilmez.** Bir kullanıcının
   maçtan çıkıp çıkmadığı, o `contentKey`'in **tüm aktif satırlarının** kadrosuna bakılarak
   belirlenir (`decideAssignmentOutcomes`, saf fonksiyon, `src/db-writer.ts`). Kullanıcı
-  kanonik (kadrosu en dolu) satırda varsa maçtadır; eski satırdaki ataması kanonik satıra
+  kanonik (son) satırda varsa maçtadır; eski satırdaki ataması kanonik satıra
   taşınır (`ROW_SHIFTED`), boşalan satır `cancelReason: "Kadro güncellendi"` ile iptal edilir.
+- **Kanonik satır "en kalabalık kadro" DEĞİL, dosyanın ŞU ANKİ hâlinde fiilen bulunan
+  satırdır** (2026-10-05, destek talebi). Seçim `currentFileMatchKeys` (dosyadan hesaplanan
+  `computeMatchKey` kümesi) ile yapılır; havuzda hâlâ birden fazla satır varsa en kalabalık,
+  kişi sayısı da eşitse DAHA YENİ satır (büyük id) kazanır. Neden: federasyon bir hakemi
+  çıkarıp yerine başkasını yazdığında iki satırın kişi sayısı EŞİT kalıyor ve `reduce`'un
+  `>` karşılaştırması eşitlikte ilk satırı koruduğu için ESKİ satır kanonik sayılıyordu —
+  federasyonun yeni kadrosu iptal ediliyor, çıkarılan kişi eski satırda `KEPT` kalıyor,
+  yani iade ettiği maç ekranında durmaya devam ediyordu (27 satır etkilenmişti).
+  **`upsertParsedMatches` bunun ikinci yarısını kapatır:** dosyada matchKey'i birebir
+  bulunan iptalli bir satırın iptalini GERİ ALIR (`cancelledAt: null`) — aksi halde bir kez
+  yanlış tarafa konan iptal kalıcı olur ve `cancelledAt: null` filtreli iade taraması o
+  satırı bir daha hiç görmez. İade edilmiş satırlar bundan etkilenmez: iade sonrası kadro
+  değiştiği için o satırın matchKey'i artık dosyada bulunmaz. Regresyon testleri:
+  `test/decide-assignment-outcomes.test.ts` → "kanonik satır seçimi" bloğu.
 - İsim karşılaştırması **her iki yönde de** `nameMatches()` (fuzzy, sıra-bağımsız) kullanır —
   atama tarafıyla (`user-matcher.ts`) simetrik olmalı. Ham `trim().toLowerCase()` eşitliği
   tek başına yeterli değildir (Excel'de isim sırası tutarsız).

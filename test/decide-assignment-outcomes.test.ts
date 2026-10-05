@@ -221,3 +221,57 @@ describe("decideAssignmentOutcomes", () => {
         assert.equal(byUser.get(364)!.kind, "CANCELLED", "Ali Can Yılmaz (çıkarılan) CANCELLED olmalı");
     });
 });
+
+// 2026-10-05 regresyonu: ŞEVKİ ENES CAN vakası. Federasyon bir hakemi çıkarıp yerine
+// başkasını yazdığında iki satırın kişi sayısı EŞİT kalıyor; eski kod eşitlikte ilk
+// (eski) satırı kanonik seçtiği için çıkarılan kişi sonsuza dek KEPT kalıyordu.
+describe("kanonik satır seçimi — dosyada fiilen bulunan satır kazanır", () => {
+    const eski = md({ hakemler: ["HASAN DEVECİ", "ŞEVKİ ENES CAN"], gozlemciler: ["EBRU ONARAN"] });
+    const yeni = md({ hakemler: ["HASAN DEVECİ", "İBRAHİM EMİR YEŞİL"], gozlemciler: ["HEVAL TANER"] });
+
+    // Eski satır (id 100) dosyadan kalkmış, yeni satır (id 200) dosyada duruyor.
+    const rows = new Map([["ck1", [
+        { id: 100, matchKey: "mkEski", data: eski },
+        { id: 200, matchKey: "mkYeni", data: yeni },
+    ]]]);
+    const inFile = new Set(["mkYeni"]);
+
+    test("çıkarılan hakem → CANCELLED (eski satırda görünse bile)", () => {
+        const out = decideAssignmentOutcomes({
+            ...input([{ userId: 1, nameInSpreadsheet: "ŞEVKİ ENES CAN",
+                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+            currentFileMatchKeys: inFile,
+        });
+        assert.equal(out[0].kind, "CANCELLED");
+    });
+
+    test("kadroda kalan kişi eski satırda kayıtlıysa → yeni satıra ROW_SHIFTED", () => {
+        const out = decideAssignmentOutcomes({
+            ...input([{ userId: 2, nameInSpreadsheet: "HASAN DEVECİ",
+                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+            currentFileMatchKeys: inFile,
+        });
+        assert.equal(out[0].kind, "ROW_SHIFTED");
+        assert.equal(out[0].toMatchId, 200);
+    });
+
+    test("yeni satırda zaten kayıtlı kişi → KEPT", () => {
+        const out = decideAssignmentOutcomes({
+            ...input([{ userId: 3, nameInSpreadsheet: "İBRAHİM EMİR YEŞİL",
+                match: { id: 200, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+            currentFileMatchKeys: inFile,
+        });
+        assert.equal(out[0].kind, "KEPT");
+    });
+
+    test("matchKey bilgisi yoksa eski davranış korunur (kalabalık kadro kazanır)", () => {
+        const kalabalik = md({ hakemler: ["HASAN DEVECİ", "ŞEVKİ ENES CAN"], gozlemciler: ["EBRU ONARAN"] });
+        const az = md({ hakemler: ["HASAN DEVECİ"] });
+        const out = decideAssignmentOutcomes(input(
+            [{ userId: 1, nameInSpreadsheet: "ŞEVKİ ENES CAN",
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+            new Map([["ck1", [{ id: 100, data: kalabalik }, { id: 200, data: az }]]]),
+        ));
+        assert.equal(out[0].kind, "KEPT");
+    });
+});
