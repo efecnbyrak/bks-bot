@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       folder_key:
-        description: 'Archive folder key (arşiv kökündeki klasör adıyla birebir aynı olmalı, örn. 2025-2026)'
+        description: 'Klasör anahtarı: arşiv kökündeki sezon klasörü adı (örn. 2025-2026) VEYA statik anahtarlardan biri: current / yerel-ligler-arsiv (geçmiş haftaların taşındığı Arşiv > Yerel Ligler klasörü)'
         required: true
         default: '2025-2026'
         type: string

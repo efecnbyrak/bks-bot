@@ -14,6 +14,20 @@ export const DRIVE_FOLDERS: Record<string, FolderConfig> = {
         resourceKey: "0-MKTgAd4XnpTp7S5flJBKuA",
         maxDepth: 0,
     },
+    // "current" klasörü maxDepth: 0 ile taranıyor, yani ALT KLASÖRLERE HİÇ GİRMİYOR.
+    // Federasyon geçmiş haftaların dosyalarını ana klasörden alıp
+    // "Arşiv ( Maç Programları ) / Yerel Ligler" alt klasörüne taşıyor — bu yüzden
+    // 1-4. hafta dosyaları bot tarafından bir daha HİÇ okunmuyor. Sonuç: o haftalarda
+    // yazılmış hatalı veri (kategori alanına sekme adı "1 hafta" yazılması, grup
+    // bilgisinin boş kalması) parser düzeltildikten sonra bile olduğu yerde kalıyordu.
+    // Bu anahtar o klasörü doğrudan hedefler; elle (sync-archives-once.yml) tetiklenir,
+    // otomatik cron'a dahil DEĞİLDİR. maxDepth: 0 — altında başka klasör yok.
+    // Sahibi istanbulbasketbol@gmail.com; servis hesabının okuma izni 2026-10-05'te
+    // canlı doğrulandı.
+    "yerel-ligler-arsiv": {
+        id: "1zZYj3qg9xnDak6f9CBxXRv1AIwjWkCJz",
+        maxDepth: 0,
+    },
 };
 
 // findLatestSeasonFolder() ile tespit edilen güncel sezonu DRIVE_FOLDERS'a kaydeder,
@@ -149,10 +163,13 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
     let seasonCache: { key: string; id: string; year: number }[] | null = null;
 
     for (const key of keys) {
-        if (key === "current") {
-            // DRIVE_FOLDERS["current"] statik tanımlı olduğu için aşağıdaki genel
+        if (key === "current" || key === "yerel-ligler-arsiv") {
+            // Bu iki anahtar DRIVE_FOLDERS'ta statik tanımlı olduğu için aşağıdaki genel
             // "zaten kayıtlı" kontrolüyle atlanır — gerçek sezon adı burada ayrıca set edilir.
-            FOLDER_SEASON_KEYS["current"] = await resolveCurrentSeasonKey();
+            // Set EDİLMEZSE ParsedMatch.sezon alanına ham anahtar ("yerel-ligler-arsiv")
+            // yazılır ve web tarafı onu sezon sanar — 2026-09-28'de tam olarak bu hata
+            // yaşandı (bkz. yukarıdaki FOLDER_SEASON_KEYS notu).
+            FOLDER_SEASON_KEYS[key] = await resolveCurrentSeasonKey();
         }
         if (DRIVE_FOLDERS[key]) continue;
         if (key === "latest-season") {
