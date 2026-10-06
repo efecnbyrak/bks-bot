@@ -56,14 +56,24 @@ describe("decideAssignmentOutcomes", () => {
         assert.equal(out[0].kind, "MOVED");
     });
 
-    test("maç işlenen dosyada yok + moved DEĞİL → CANCELLED", () => {
+    test("maç işlenen dosyada yok + moved DEĞİL + GELECEK tarihli → CANCELLED", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map(),
             { currentFileContentKeys: new Set(), movedContentKeys: new Set() },
         ));
         assert.equal(out[0].kind, "CANCELLED");
+    });
+
+    test("maç işlenen dosyada yok + moved DEĞİL + GEÇMİŞ tarihli → EXPIRED_WINDOW (kayan pencere dosyası, dokunma)", () => {
+        const out = decideAssignmentOutcomes(input(
+            [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2020" } }],
+            new Map(),
+            { currentFileContentKeys: new Set(), movedContentKeys: new Set() },
+        ));
+        assert.equal(out[0].kind, "EXPIRED_WINDOW");
     });
 
     test("kademeli doldurma: kullanıcı eski satırda, kanonik (dolu) satır aynı dosyada → ROW_SHIFTED", () => {

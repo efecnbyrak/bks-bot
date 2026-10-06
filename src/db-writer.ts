@@ -84,6 +84,16 @@ export function parseTarihDate(tarih: string): Date | null {
     return null;
 }
 
+// Bugünden (UTC gün başlangıcı) kesin olarak önceki bir tarih mi? Ayrıştırılamayan
+// tarihlerde güvenli tarafta kal (false döner → eski CANCELLED davranışı bozulmaz).
+function isPastRollingWindowMatch(tarih: string): boolean {
+    const parsed = parseTarihDate(tarih);
+    if (!parsed) return false;
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    return parsed.getTime() < todayUtc.getTime();
+}
+
 export async function upsertDriveFile(
     file: DriveSpreadsheet,
     folderKey: string,
@@ -365,7 +375,7 @@ export function evaluateCancellationSafety(
 //                  Atama yeni satıra taşınır, eski satır (kimse kalmazsa) iptal edilir.
 //  - CANCELLED   : ismi bu maçın HİÇBİR aktif satırında yok → gerçek iade
 //  - MOVED       : maç (contentKey) bu dosyada yok ama başka aktif dosyada var → arşive taşınma, sessiz
-export type AssignmentOutcomeKind = "KEPT" | "ROW_SHIFTED" | "CANCELLED" | "MOVED";
+export type AssignmentOutcomeKind = "KEPT" | "ROW_SHIFTED" | "CANCELLED" | "MOVED" | "EXPIRED_WINDOW";
 
 export interface AssignmentDecisionInput {
     // İptal kontrolü yapılacak mevcut atamalar (DB'den gelir)
@@ -462,8 +472,15 @@ export function decideAssignmentOutcomes(input: AssignmentDecisionInput): Assign
             if (input.movedContentKeys.has(contentKey)) {
                 // Başka aktif dosyada var → arşive / revizyon dosyasına taşınmış, sessiz
                 decisions.push({ ...base, kind: "MOVED" });
+            } else if (isPastRollingWindowMatch(a.match.tarih)) {
+                // TBF-FIBA-MİLLİ gibi dosyalar artık tüm sezonu değil sadece +1 haftalık
+                // kayan pencereyi gösteriyor (2026-10-06). Geçmiş tarihli bir maç bu
+                // pencereden çıktı diye "iptal" sayılmaz — federasyon maçı arşive
+                // taşıdığı için geçici olarak hiçbir aktif dosyada görünmeyebilir, arşiv
+                // senkronu onu bulunca zaten MOVED olur. Dokunma.
+                decisions.push({ ...base, kind: "EXPIRED_WINDOW" });
             } else {
-                // Hiçbir aktif dosyada yok → gerçek iade
+                // Gelecek tarihli bir maç hiçbir aktif dosyada yok → gerçek iade
                 decisions.push({ ...base, kind: "CANCELLED" });
             }
             continue;
