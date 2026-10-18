@@ -243,6 +243,12 @@ function parseFileMetadata(fileName: string): { hafta?: number; ligTuru: string 
     if (fn.includes("ÖZEL LİG") || fn.includes("ÜNİVERSİTE") || fn.includes("OZEL LIG") || fn.includes("UNIVERSITE")) {
         return { hafta, ligTuru: "ÖZEL LİG VE ÜNİVERSİTE" };
     }
+    // F7 — web tarafı (lib/matches/atamalar-row.ts -> normalizeLigTuru) "BÖLGE LİGİ"
+    // ham değerini bekliyor ama bu dal şimdiye kadar hiç yoktu, bu yüzden hiçbir
+    // gerçek Bölge dosyası tanınmıyor ve fallback'e ("Yerel Lig") düşüyordu.
+    if (fn.includes("BÖLGE") || fn.includes("BOLGE")) {
+        return { hafta, ligTuru: "BÖLGE LİGİ" };
+    }
     if (fn.includes("TBF") || fn.includes("MİLLİ") || fn.includes("FIBA") || fn.includes("AVRUPA")) {
         return { hafta, ligTuru: "TBF / MİLLİ" };
     }
