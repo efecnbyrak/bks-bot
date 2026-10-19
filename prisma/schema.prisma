@@ -443,6 +443,7 @@ model UserAnswer {
   selectedAnswer String
   correctAnswer  String
   isCorrect      Boolean
+  isBlank        Boolean     @default(false) // Soru hiç cevaplanmadan bırakıldı mı (bot bu alana yazmaz, şema birebir eşit kalsın diye var)
 
   // bks-web-system ile senkron — Sonuçlar sekmesi geçmiş snapshot'ları
   questionType   String?

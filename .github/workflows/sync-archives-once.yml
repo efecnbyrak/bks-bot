@@ -61,4 +61,11 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_RESOURCE_KEY: ${{ secrets.GOOGLE_DRIVE_RESOURCE_KEY }}
           FIREBASE_SERVICE_ACCOUNT_KEY_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 }}
+          # index.ts her çalıştığında TBF/Milli sheet sync'i de koşuyor (bkz. sync-current.yml) —
+          # bu dosyalar olmadan da hata vermez, sadece uyarı loglar ve atlar.
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          TBF_MILLI_CURRENT_SHEET_ID: "13vqGkED9g946sOTu6YvPDkpbOru3NvXMRWKA10KkInc"
+          TBF_MILLI_ARCHIVE_SHEET_ID: "1yyONb3WuR_ySyOZ_7SQ9HfAWl3-mZqC5KV9CXEnsZ5k"
           LOG_LEVEL: info

@@ -105,6 +105,50 @@ sayfasına kategori olarak da sızıyordu. Artık satır atlanıyor, sayısı do
 `[PARSER] ... satır atlandı` olarak loglanıyor. **Bu log'daki sayı artıyorsa kaynak
 dosyanın başlıkları değişmiş demektir** — `scripts/inspect-drive-headers.ts` ile bak.
 
+## TBF/FIBA/Milli Maçları — Drive Değil, Google Sheets Kaynağı (2026-10-20'de eklendi)
+
+TBL, EuroLeague, BGL, BSL, KBSL, FIBA BCL/EuroCup, Milli Takım hazırlık maçları gibi
+federasyon/milli maçları Drive'a xlsx olarak düşmüyor — federasyon bunları doğrudan iki
+canlı Google E-Tablosunda tutuyor (kullanıcı geri bildirimi: "TBL maçım Maçlarım'da yok").
+Bot bu iki kaynağı `src/tbf-milli-sync.ts` → `runTbfMilliSync()` ile okur, `src/index.ts`'te
+Drive klasör döngüsünden SONRA, ayrı bir adım olarak çalışır:
+
+- **GÜNCEL** (`TBF_MILLI_CURRENT_SHEET_ID`) — sadece o haftanın maçlarını tutar, federasyon
+  haftalık üzerine yazıyor (arşiv DEĞİL).
+- **ARŞİV** (`TBF_MILLI_ARCHIVE_SHEET_ID`) — sezon başından bugüne kadar biriken tüm maçlar,
+  GÜNCEL'in bir önceki gününe kadar (iki kaynak arasında tarih çakışması yok, 2026-10-20'de
+  canlı doğrulandı).
+
+**Kimlik**: Bot'un kendi Drive servis hesabı sadece `drive.readonly` scope'una sahip, Sheets
+okuyamaz. Bu yüzden `src/lib/sheets-source.ts` web reposunun (`bks-web-system/lib/google-oauth.ts`)
+OAuth kimliğini YENİDEN KULLANIYOR (`GOOGLE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN` — iki
+repoda da aynı 3 değer). Sheet ID'leri secret değil (link ile görüntülemeye açık) ama CLAUDE.md
+kuralına uyup env'den okunuyor (`TBF_MILLI_CURRENT_SHEET_ID`/`TBF_MILLI_ARCHIVE_SHEET_ID`).
+
+**Parser TEKRAR YAZILMADI**: `sheets-source.ts` ham sheet satırlarını (TARİH/SAAT sütunları
+sayısal seri/kesirden `"DD.MM.YYYY"`/`"HH:MM"` string'ine çevrilmiş olarak) bellekte tek
+sayfalı bir ExcelJS workbook'a yükler, `tbf-milli-sync.ts` bunu mevcut `parseWorkbook`
+(`src/lib/match-parser.ts`) ile ayrıştırır — sütun eşleme/HAKEM-MASA-GÖZLEMCİ alias mantığı
+iki kaynakta (Drive xlsx + bu sheet) birebir aynı kalır. `ligTuru` için de ek kod YOK:
+`parseFileMetadata` dosya adında (burada sheet başlığı) "TBF"/"FIBA"/"MİLLİ" görünce zaten
+`"TBF / MİLLİ"` veriyor, sheet başlıkları ("TBF-FIBA-MİLLİ MAÇLAR ...") bunu doğal tetikler.
+
+**`kategori` alanı KATEGORİ sütunundan HAM olarak geliyor** (BGL/BSL/TBL/EUROLEAGUE/FIBA BCL/
+FIBA EUROCUP/KBSL/TB2L/TKBL vb., sheet'te yazan ne ise) — kullanıcı talebi "orda yazan
+kategori neyse sisteme onu alacaksın" (2026-10-20). Web tarafında bks-web-system'daki
+dinamik `kategoriler[]` ödeme akışı (`lib/matches/fee.ts`) bunu otomatik yakalıyor, ek bir
+sabit tarife alanı/kartı gerekmedi.
+
+**Bu kaynak Drive-dosya değişim tespitine (`detectChanges`) GİRMİYOR** — her sync'te
+koşulsuz yeniden okunup yeniden yazılıyor (satır sayısı küçük — ~15-150 satır — maliyeti
+yok). `upsertDriveFile`'a sahte bir dosya kaydı (`id: "sheet:<spreadsheetId>"`) veriliyor ki
+`ParsedMatch.driveFileId` ilişkisi ve `detectAndMarkCancelledMatches` aynı mekanizmayı
+kullanabilsin. Kilit/jitter kendi sözde klasör anahtarıyla (`"tbf-milli-sheets"`) çalışır,
+diğer klasörlerden bağımsızdır.
+
+**Teşhis**: `scripts/dry-run-tbf-milli.ts` (SALT OKUMA) iki sheet'i okuyup parse sonucunu
+basar, DB'ye yazmaz — sheet başlıkları değişirse (sütun sırası/adı) önce bununla kontrol et.
+
 ## Aktif Sezonun ARŞİV Kopyası Atlanır (2026-10-01)
 
 Federasyon, içinde bulunduğumuz sezonun bir "ARŞİV ..." kopyasını da arşiv klasöründe

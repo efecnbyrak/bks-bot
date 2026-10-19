@@ -1,5 +1,6 @@
 import { resolveSyncFolderKeys } from "./config";
 import { runSync, RunSyncResult } from "./orchestrator";
+import { runTbfMilliSync } from "./tbf-milli-sync";
 import { reconcileAndNotify } from "./change-notifier";
 import { isFirstEverSync, CancelledMatchInfo, ShiftedAssignmentInfo } from "./db-writer";
 import { consolidateActiveContentKeyDuplicates } from "./lib/contentkey-consolidator";
@@ -32,6 +33,18 @@ async function main() {
             allNewAssignments.push(...result.newAssignments);
             allCancellations.push(...result.cancellations);
             allShifted.push(...result.shifted);
+        }
+
+        // TBF/FIBA/Milli maçları (TBL, EuroLeague, BGL, BSL, KBSL, FIBA BCL/EuroCup vb.) —
+        // Drive .xlsx değil, iki canlı Google E-Tablosundan okunuyor (src/tbf-milli-sync.ts).
+        // TBF_MILLI_CURRENT_SHEET_ID / TBF_MILLI_ARCHIVE_SHEET_ID ayarlı değilse sessizce atlanır.
+        try {
+            const tbfResult = await runTbfMilliSync();
+            allNewAssignments.push(...tbfResult.newAssignments);
+            allCancellations.push(...tbfResult.cancellations);
+            allShifted.push(...tbfResult.shifted);
+        } catch (tbfErr: any) {
+            logger.error("TBF/Milli sheet sync hatası (diğer klasörler yine işlendi)", { error: tbfErr?.message });
         }
 
         // Tüm klasörler işlendikten SONRA tek bir uzlaştırma adımı: kullanıcı bazında
