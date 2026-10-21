@@ -266,6 +266,10 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
     // Hiç ayrıştırılamayan (maç adı çıkarılamayan) satır sayısı — sessizce yutulmasın diye
     // dosya sonunda loglanıyor. Bu sayı artıyorsa kaynak dosyanın başlıkları değişmiş olabilir.
     let skippedUnparsable = 0;
+    // Hakem/görevli ataması henüz YAPILMAMIŞ ama maç verisi (tarih/takım/kategori)
+    // dolu satırların sayısı — bunlar artık ARTIK ATLANMIYOR (bkz. aşağıdaki not),
+    // sadece görünürlük için sayılıyor.
+    let unassignedMatchesImported = 0;
     const category = fileName.replace(/\.(xlsx|xls|csv)$/i, "").replace(/ARŞİV\s*/i, "").trim();
     const fileMeta = parseFileMetadata(fileName);
 
@@ -425,9 +429,23 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
             const gozlemciler = gozlemciCols.map(j => row[j] || "").filter(v => v.length > 2);
             const sahaKomiserleri = sahaKomiseriCols.map(j => row[j] || "").filter(v => v.length > 2);
 
+            // 2026-10-22 (kullanıcı canlıda yakaladı — F7 atama önerisi hiç veri
+            // göremiyordu): bu satır eskiden (bot'un ilk gününden beri) hakem/görevli
+            // sütunlarının HEPSİ boşsa satırı SESSİZCE atlıyordu — tarih/takım/kategori
+            // dolu olsa bile. O zamanki tasarım varsayımı "bot sadece ONAYLANMIŞ
+            // atamaları takip eder"di; artık F7 henüz atanmamış maçlara da öneri
+            // üretmek istediği için bu varsayım doğrudan çakışıyor — federasyonun
+            // yayınladığı ama henüz hakem atanmamış maçlar (örn. 8. Hafta'nın hafta
+            // sonu kısmı) hiçbir zaman DB'ye düşmüyordu. Satır artık ATLANMIYOR;
+            // boş hakem/görevli dizileriyle ParsedMatch'e yazılıyor (F7/manuel atama
+            // daha sonra doldurur). Gerçekten boş/anlamsız satırlar birkaç satır
+            // aşağıdaki "maç adı çıkarılamadı" kontrolünden (skippedUnparsable,
+            // loglu) hâlâ elenir.
             if (hakemler.length === 0 && masaGorevlileri.length === 0 &&
                 saglikcilar.length === 0 && istatistikciler.length === 0 &&
-                gozlemciler.length === 0 && sahaKomiserleri.length === 0) continue;
+                gozlemciler.length === 0 && sahaKomiserleri.length === 0) {
+                unassignedMatchesImported += 1;
+            }
 
             let macAdi = "";
             if (macCols.length) {
@@ -482,6 +500,9 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
     }
     if (skippedUnparsable > 0) {
         console.warn(`[PARSER] ${fileName}: maç adı çıkarılamayan ${skippedUnparsable} satır atlandı (takım/maç sütunu eşleşmedi).`);
+    }
+    if (unassignedMatchesImported > 0) {
+        console.info(`[PARSER] ${fileName}: hakem/görevli ataması henüz yapılmamış ${unassignedMatchesImported} maç, boş kadroyla içeri alındı.`);
     }
     return allMatches;
 }
