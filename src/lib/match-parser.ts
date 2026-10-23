@@ -19,6 +19,10 @@ export interface MatchData {
     gozlemciler: string[];
     sahaKomiserleri: string[];
     kaynak_dosya: string;
+    // Kaynak dosyadaki sekme adı ve 1 tabanlı satır numarası — web Atamalar
+    // sayfası tabloyu X.HAFTA Excel'indeki sırayla göstermek için bunları kullanır.
+    kaynak_sekme?: string;
+    kaynak_satir?: number;
 }
 
 export interface UserMatchSummary {
@@ -279,7 +283,10 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
             : category;
 
         const rows: string[][] = [];
+        // rows[i]'nin Excel'deki gerçek satır numarası (boş satırlar atlandığı için i+1 değil)
+        const rowNumbers: number[] = [];
         ws.eachRow({ includeEmpty: false }, (row: any) => {
+            rowNumbers.push(row.number);
             const vals: string[] = [];
             row.eachCell({ includeEmpty: true }, (_cell: any, colNumber: number) => {
                 while (vals.length < colNumber) vals.push("");
@@ -495,6 +502,8 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                 hakemler, masa_gorevlileri: masaGorevlileri, saglikcilar, istatistikciler, gozlemciler,
                 sahaKomiserleri,
                 kaynak_dosya: `${fileName} → ${ws.name}`,
+                kaynak_sekme: ws.name,
+                kaynak_satir: rowNumbers[i],
             });
         }
     }

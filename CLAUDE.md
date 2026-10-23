@@ -397,3 +397,11 @@ gerekmiyor — bot kodu bu modellere hiç referans vermiyor (checklist adım 1'i
 - Commit mesajlarına AI imzası eklemek konusunda kullanıcıya sor — `bks-web-system` reposunda
   bu açıkça yasaklı (proje kuralı), bu repoda aksi belirtilmediği sürece aynı kural geçerli
   sayılmalı.
+
+## Kaynak Satır Bilgisi (`ParsedMatch.kaynakSekme` / `kaynakSatir`, 2026-10-24)
+
+`parseWorkbook` her maça sekme adını (`kaynak_sekme`) ve Excel'deki GERÇEK satır
+numarasını (`kaynak_satir`, `row.number` — boş satırlar atlandığı için dizi indeksi
+DEĞİL) yazar; `upsertParsedMatches` bunları create + update payload'ında taşır. Web
+Atamalar tablosu varsayılan olarak bu sırayla gösterilir. Şema değişikliği web
+reposunda yapılır (`db:push` ASLA buradan çalıştırılmaz).

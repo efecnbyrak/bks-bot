@@ -63,3 +63,23 @@ describe("fuzzyNameMatch", () => {
         assert.equal(fuzzyNameMatch("Ali Su", "Ali", "So"), false);
     });
 });
+
+// Atamalar tablosu Excel sırasıyla gösteriliyor — parser her maça kaynak sekme
+// adını ve Excel'deki GERÇEK satır numarasını (boş satırlar atlansa bile) yazmalı.
+describe("parseWorkbook kaynak satır bilgisi", () => {
+    test("sekme adı ve Excel satır numarası maça yazılır", async () => {
+        const ExcelJS = (await import("exceljs")).default;
+        const { parseWorkbook } = await import("../src/lib/match-parser");
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet("U14 ERKEK");
+        ws.getRow(1).values = ["TARİH", "SAAT", "SALON", "A TAKIMI", "B TAKIMI", "HAKEM", "HAKEM"];
+        ws.getRow(2).values = ["01.11.2026", "10:00", "SALON X", "ALFA SK", "BETA SK", "Ali Veli", "Can Kaya"];
+        // 3. satır bilinçli olarak boş — numara 4 olarak korunmalı
+        ws.getRow(4).values = ["01.11.2026", "12:00", "SALON X", "GAMA SK", "DELTA SK", "Ali Veli", "Can Kaya"];
+        const matches = parseWorkbook(wb as any, "1.HAFTA YEREL LİG.xlsx");
+        assert.equal(matches.length, 2);
+        assert.equal(matches[0].kaynak_sekme, "U14 ERKEK");
+        assert.equal(matches[0].kaynak_satir, 2);
+        assert.equal(matches[1].kaynak_satir, 4);
+    });
+});

@@ -157,6 +157,8 @@ export async function upsertParsedMatches(
         gozlemciler: match.gozlemciler,
         sahaKomiserleri: match.sahaKomiserleri,
         kaynakDosya: match.kaynak_dosya,
+        kaynakSekme: match.kaynak_sekme ?? null,
+        kaynakSatir: match.kaynak_satir ?? null,
         driveFileId: driveFileDbId,
     }));
 
@@ -214,6 +216,8 @@ export async function upsertParsedMatches(
                             gozlemciler: r.gozlemciler,
                             sahaKomiserleri: r.sahaKomiserleri,
                             kaynakDosya: r.kaynakDosya,
+                            kaynakSekme: r.kaynakSekme,
+                            kaynakSatir: r.kaynakSatir,
                             driveFileId: r.driveFileId,
                             cancelledAt: null,
                             cancelReason: null,

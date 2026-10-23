@@ -193,6 +193,9 @@ model ParsedMatch {
 
   // bks-web-system ile şema senkronu — bot artık bunu dolduruyor (db-writer.ts),
   // db:push her zaman web reposundan yapılır, burada sadece generate için tanımlı.
+  // Kaynak sekme adı + Excel satır numarası (Atamalar tablosunun Excel sırası için)
+  kaynakSekme     String?
+  kaynakSatir     Int?
   grup            String?
 
   hakemler        String[]
