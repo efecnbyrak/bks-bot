@@ -8,6 +8,7 @@ import {
     acquireLock,
     releaseLock,
     detectAndMarkCancelledMatches,
+    cancelRowsMissingFromFile,
     CancelledMatchInfo,
     ShiftedAssignmentInfo,
     parseTarihDate,
@@ -210,6 +211,10 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
                 const scan = await detectAndMarkCancelledMatches(driveFileDbId, matches);
                 runResult.cancellations.push(...scan.cancelled);
                 runResult.shifted.push(...scan.shifted);
+
+                // Excel'den silinen/taşınan, ataması olmayan gelecek satırlar iptal edilir
+                // (aksi halde web Atamalar sayfası bunları atanacak maç sanıyor).
+                await cancelRowsMissingFromFile(driveFileDbId, matches);
 
             } catch (err: any) {
                 const errMsg = err?.message || "Bilinmeyen hata";

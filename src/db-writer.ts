@@ -821,6 +821,61 @@ export async function detectAndMarkCancelledMatches(
     return { cancelled, shifted };
 }
 
+// DOSYADAN KALKAN SATIRLAR (2026-10-25, web Atamalar sayfasında yakalandı): federasyon
+// bir maçı Excel'den siler veya başka güne taşırsa eski satır DB'de aktif kalıyordu
+// (detectAndMarkCancelledMatches yalnızca ATAMASI olan satırlara bakar). Boş hakemli
+// bu "hayalet" satırlar web'in öneri motoruna atanacak maç gibi giriyordu.
+//
+// Sadece GÜVENLİ olanlar iptal edilir:
+//  - satırın üzerinde hiç UserMatchAssignment yok (atamalı satırlar iade akışında),
+//  - tarihi bugünden ileride (geçmiş/sezon kesimi öncesi satırlar filtreyle düştüğü
+//    için dosyada "yok" görünür — onlara dokunulmaz), tarihsiz satırlara dokunulmaz,
+//  - kalkan satır sayısı dosyanın gelecekteki aktif satırlarının yarısını geçmiyor
+//    (geçerse bir sekme okunamamış olabilir → hiçbir şey yapılmaz, uyarı loglanır).
+// Satır dosyaya geri dönerse upsertParsedMatches iptali zaten geri açar.
+export const MISSING_ROW_MAX_RATIO = 0.5;
+
+export function pickRowsMissingFromFile(
+    activeFutureRows: { id: number; matchKey: string; hasAssignments: boolean }[],
+    currentKeys: Set<string>
+): { status: "ok"; ids: number[] } | { status: "skipped"; reason: string } {
+    const missing = activeFutureRows.filter(r => !currentKeys.has(r.matchKey));
+    if (missing.length === 0) return { status: "ok", ids: [] };
+    if (missing.length > activeFutureRows.length * MISSING_ROW_MAX_RATIO) {
+        return { status: "skipped", reason: `${missing.length}/${activeFutureRows.length} satır dosyada yok — eşik aşıldı` };
+    }
+    return { status: "ok", ids: missing.filter(r => !r.hasAssignments).map(r => r.id) };
+}
+
+export async function cancelRowsMissingFromFile(driveFileDbId: number, matches: MatchData[]): Promise<number> {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const rows = await db.parsedMatch.findMany({
+        where: { driveFileId: driveFileDbId, cancelledAt: null, tarihDate: { gte: today } },
+        select: { id: true, matchKey: true, _count: { select: { userAssignments: true } } },
+    });
+    const decision = pickRowsMissingFromFile(
+        rows.map((r: { id: number; matchKey: string; _count: { userAssignments: number } }) =>
+            ({ id: r.id, matchKey: r.matchKey, hasAssignments: r._count.userAssignments > 0 })),
+        new Set(matches.map(computeMatchKey))
+    );
+    if (decision.status === "skipped") {
+        logger.warn("Dosyadan kalkan satır temizliği atlandı", { driveFileDbId, reason: decision.reason });
+        return 0;
+    }
+    if (decision.ids.length === 0) return 0;
+    if (DRY_RUN) {
+        logger.info("Dosyadan kalkan satırlar (DRY_RUN — yazılmadı)", { driveFileDbId, ids: decision.ids.slice(0, 20) });
+        return 0;
+    }
+    await db.parsedMatch.updateMany({
+        where: { id: { in: decision.ids }, cancelledAt: null },
+        data: { cancelledAt: new Date(), cancelReason: "Dosyadan kaldırıldı" },
+    });
+    logger.info("Dosyadan kalkan satırlar iptal edildi", { driveFileDbId, count: decision.ids.length });
+    return decision.ids.length;
+}
+
 export async function createCancellationAnnouncements(
     cancelledMatches: CancelledMatchInfo[]
 ): Promise<void> {

@@ -151,3 +151,20 @@ describe("parseTarihDate", () => {
         assert.equal(parseTarihDate("15 XYZ 2026 Pazartesi"), null);
     });
 });
+
+// 2026-10-25: Excel'den kalkan satırların iptali (web Atamalar "hayalet satır").
+import { pickRowsMissingFromFile } from "../src/db-writer";
+describe("pickRowsMissingFromFile", () => {
+    const row = (id: number, matchKey: string, hasAssignments = false) => ({ id, matchKey, hasAssignments });
+    test("dosyada olmayan, ataması olmayan satır seçilir", () => {
+        const r = pickRowsMissingFromFile([row(1, "a"), row(2, "b"), row(3, "c", true), row(4, "d")], new Set(["a", "b"]));
+        assert.deepEqual(r, { status: "ok", ids: [4] });
+    });
+    test("satırların yarısından fazlası kalkmışsa (sekme okunamamış olabilir) hiçbir şey yapılmaz", () => {
+        const r = pickRowsMissingFromFile([row(1, "a"), row(2, "b"), row(3, "c")], new Set(["a"]));
+        assert.equal(r.status, "skipped");
+    });
+    test("eksik yoksa boş liste", () => {
+        assert.deepEqual(pickRowsMissingFromFile([row(1, "a")], new Set(["a"])), { status: "ok", ids: [] });
+    });
+});

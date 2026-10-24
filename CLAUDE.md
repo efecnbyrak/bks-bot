@@ -289,6 +289,14 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   satırı bir daha hiç görmez. İade edilmiş satırlar bundan etkilenmez: iade sonrası kadro
   değiştiği için o satırın matchKey'i artık dosyada bulunmaz. Regresyon testleri:
   `test/decide-assignment-outcomes.test.ts` → "kanonik satır seçimi" bloğu.
+- **Dosyadan kalkan satırlar iptal edilir** (2026-10-25): `src/db-writer.ts` →
+  `cancelRowsMissingFromFile` (orchestrator, `detectAndMarkCancelledMatches`'ten sonra).
+  Federasyon bir maçı Excel'den silip/taşıyınca eski satır aktif kalıyor, web Atamalar
+  sayfası onu atanacak maç sanıyordu. Sadece: ataması olmayan + tarihi bugün/ileri + dosyada
+  matchKey'i yok. Kalkan sayı dosyanın gelecek aktif satırlarının yarısını geçerse
+  (`MISSING_ROW_MAX_RATIO`, sekme okunamamış olabilir) hiçbir şey yapılmaz, uyarı loglanır.
+  `cancelReason = "Dosyadan kaldırıldı"`. Satır dosyaya geri gelirse `upsertParsedMatches` iptali açar.
+  Web aynı durumu `updatedAt` ile ayrıca süzer (`lib/matches/assigned-filter.ts`).
 - İsim karşılaştırması **her iki yönde de** `nameMatches()` (fuzzy, sıra-bağımsız) kullanır —
   atama tarafıyla (`user-matcher.ts`) simetrik olmalı. Ham `trim().toLowerCase()` eşitliği
   tek başına yeterli değildir (Excel'de isim sırası tutarsız).
