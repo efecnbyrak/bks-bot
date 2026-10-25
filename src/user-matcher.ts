@@ -48,6 +48,7 @@ export interface NewAssignmentInfo {
     matchId: number;
     macAdi: string;
     tarih: string;
+    saat?: string | null;
     // FAZ 2 — reconcileAndNotify'ın iptalle eşleştirmede "aynı maç mı" ayrımı için.
     contentKey: string | null;
     // Kadro değişikliği özeti üretmek için (ROW_SHIFTED → "Maçınız Güncellendi").
@@ -287,6 +288,7 @@ export async function buildUserAssignments(
                 matchId: a.matchId,
                 macAdi: match.mac_adi,
                 tarih: match.tarih,
+                saat: match.saat ?? null,
                 contentKey: contentKeyByMatchId.get(a.matchId) ?? null,
                 matchData: match,
             };

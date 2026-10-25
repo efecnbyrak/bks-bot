@@ -254,6 +254,13 @@ ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır sili
    `MATCH_ASSIGNED`, `MATCH_CHANGED`, `MATCH_CANCELLED`, `MATCH_UPDATED` (hepsi
    `screen: "MATCHES"`). Yeni bir tip eklenirse `badge_service.dart` `bumpFromPushType`
    switch'ine de eklenmeli.
+   **Geçmiş maça bildirim YOK (2026-10-26, kullanıcı kararı):** başlama anı İstanbul saatiyle
+   geçmiş maç için iptal/güncellendi/değişti/yeni atama push'u gitmez. Tek kaynak
+   `src/lib/match-time.ts` → `isMatchStarted(tarih, saat, now)` (saat yoksa gün sonu).
+   `decideAssignmentOutcomes` başlamış maçta CANCELLED yerine `EXPIRED_WINDOW` verir (atama
+   silinmez), `planNotifications` → `filterFutureEvents` olayları plana girmeden süzer.
+   Eskiden kontrol UTC GÜN bazlıydı — aynı gün oynanmış veya TRT gece yarısından sonra
+   arşive taşınan maç "İptal" push'u alıyordu.
 4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
    yana açılıp model/alan/index listesi karşılaştırılmalı.
 5. **`Announcement.source` senkronu (2026-09-28):** web'in `schema.prisma`'sındaki

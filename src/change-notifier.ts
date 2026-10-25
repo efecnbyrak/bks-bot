@@ -8,6 +8,7 @@ import {
 } from "./lib/push-sender";
 import { summarizeSquadChange } from "./lib/squad-change";
 import { logger } from "./logger";
+import { isMatchStarted } from "./lib/match-time";
 
 /**
  * Bir sync koşusunda (current + arşiv, tüm klasörler işlendikten sonra) toplanan
@@ -45,11 +46,26 @@ export interface PlanInput {
     shifted: ShiftedAssignmentInfo[];
 }
 
-export function planNotifications(input: PlanInput): {
+// Bildirim yalnızca HENÜZ BAŞLAMAMIŞ maçlar için gider (kullanıcı kararı, 2026-10-26):
+// oynanmış bir maç için "iptal / güncellendi / değişti / yeni atama" anlamsızdır.
+// Bu süzgeç olaylar plana girmeden önce uygulanır; "Maçınız Değişti" eşleştirmesi de
+// böylece doğal olarak düzelir (eski maç geçmişse yeni maç düz "Yeni Maça Atandınız",
+// yeni maç geçmişse eski maç düz "İptal" olur, ikisi de geçmişse hiçbir şey gitmez).
+export function filterFutureEvents(input: PlanInput, now: Date = new Date()): PlanInput {
+    const future = (tarih: string, saat?: string | null) => !isMatchStarted(tarih, saat, now);
+    return {
+        newAssignments: input.newAssignments.filter(a => future(a.tarih, a.saat)),
+        cancellations: input.cancellations.filter(c => future(c.tarih, c.saat)),
+        shifted: input.shifted.filter(s => future(s.tarih, s.saat)),
+    };
+}
+
+export function planNotifications(rawInput: PlanInput, now: Date = new Date()): {
     notifications: PlannedNotification[];
     // Gerçek iptaller için toplu duyuru + toplu push (maç bazında gruplu)
     realCancellationGroups: { macAdi: string; tarih: string; userIds: number[] }[];
 } {
+    const input = filterFutureEvents(rawInput, now);
     const notifications: PlannedNotification[] = [];
 
     // Bir kullanıcı için birden fazla olay olabilir — hangi kullanıcının hangi bildirimi

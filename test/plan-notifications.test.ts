@@ -6,7 +6,7 @@ import { NewAssignmentInfo } from "../src/user-matcher";
 
 function md(overrides: Partial<MatchData> = {}): MatchData {
     return {
-        mac_adi: "A - B", tarih: "07.09.2026", saat: "16:00", salon: "SALON",
+        mac_adi: "A - B", tarih: "07.09.2099", saat: "16:00", salon: "SALON",
         kategori: "U14", ligTuru: "Yerel Lig",
         hakemler: [], masa_gorevlileri: [], saglikcilar: [],
         istatistikciler: [], gozlemciler: [], sahaKomiserleri: [],
@@ -15,7 +15,7 @@ function md(overrides: Partial<MatchData> = {}): MatchData {
 }
 function newAsg(o: Partial<NewAssignmentInfo> & { userId: number }): NewAssignmentInfo {
     return {
-        matchId: 1, macAdi: "A - B", tarih: "07.09.2026", contentKey: "ck1",
+        matchId: 1, macAdi: "A - B", tarih: "07.09.2099", contentKey: "ck1",
         matchData: md(), ...o,
     };
 }
@@ -26,7 +26,7 @@ describe("planNotifications", () => {
             newAssignments: [newAsg({ userId: 1, contentKey: "ck1" })], // aynı kullanıcı yeni satıra da atandı
             cancellations: [],
             shifted: [{
-                userId: 1, macAdi: "A - B", tarih: "07.09.2026", contentKey: "ck1",
+                userId: 1, macAdi: "A - B", tarih: "07.09.2099", contentKey: "ck1",
                 oldMatchData: md({ masa_gorevlileri: ["AHMET"] }),
                 newMatchData: md({ masa_gorevlileri: ["AHMET"], hakemler: ["X", "Y"] }),
             }],
@@ -43,7 +43,7 @@ describe("planNotifications", () => {
             newAssignments: [newAsg({ userId: 5, contentKey: "ckSAME", macAdi: "A - B" })],
             cancellations: [{
                 matchId: 10, matchKey: "", contentKey: "ckSAME",
-                macAdi: "A - B", tarih: "07.09.2026", affectedUserIds: [5],
+                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [5],
             }],
             shifted: [],
         });
@@ -56,7 +56,7 @@ describe("planNotifications", () => {
             newAssignments: [newAsg({ userId: 5, contentKey: "ckNEW", macAdi: "C - D" })],
             cancellations: [{
                 matchId: 10, matchKey: "", contentKey: "ckOLD",
-                macAdi: "A - B", tarih: "07.09.2026", affectedUserIds: [5],
+                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [5],
             }],
             shifted: [],
         });
@@ -71,7 +71,7 @@ describe("planNotifications", () => {
             newAssignments: [],
             cancellations: [{
                 matchId: 10, matchKey: "", contentKey: "ck1",
-                macAdi: "A - B", tarih: "07.09.2026", affectedUserIds: [7, 8],
+                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [7, 8],
             }],
             shifted: [],
         });

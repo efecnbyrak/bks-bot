@@ -3,6 +3,7 @@ import { db } from "./db";
 import { MatchData, nameMatches } from "./lib/match-parser";
 import { DriveSpreadsheet } from "./lib/google-drive";
 import { logger } from "./logger";
+import { isMatchStarted } from "./lib/match-time";
 
 // İlk kurulum koruması: DB'de hiç parsedMatch yoksa bu, sistemin ilk çalışması demektir.
 // Bu durumda tüm atamalar "yeni" sayılacağından, binlerce yanlış bildirim gitmemesi için
@@ -82,16 +83,6 @@ export function parseTarihDate(tarih: string): Date | null {
     }
 
     return null;
-}
-
-// Bugünden (UTC gün başlangıcı) kesin olarak önceki bir tarih mi? Ayrıştırılamayan
-// tarihlerde güvenli tarafta kal (false döner → eski CANCELLED davranışı bozulmaz).
-function isPastRollingWindowMatch(tarih: string): boolean {
-    const parsed = parseTarihDate(tarih);
-    if (!parsed) return false;
-    const todayUtc = new Date();
-    todayUtc.setUTCHours(0, 0, 0, 0);
-    return parsed.getTime() < todayUtc.getTime();
 }
 
 export async function upsertDriveFile(
@@ -315,6 +306,7 @@ export interface CancelledMatchInfo {
     matchKey: string;
     macAdi: string;
     tarih: string;
+    saat?: string | null;
     affectedUserIds: number[];
     // FAZ 2 — reconcileAndNotify'ın "aynı maça mı yeniden atandı (güncelleme),
     // yoksa başka maça mı taşındı (değişiklik)" ayrımını yapabilmesi için.
@@ -328,6 +320,7 @@ export interface ShiftedAssignmentInfo {
     userId: number;
     macAdi: string;
     tarih: string;
+    saat?: string | null;
     contentKey: string | null;
     oldMatchData: MatchData | null;
     newMatchData: MatchData | null;
@@ -379,6 +372,9 @@ export function evaluateCancellationSafety(
 //                  Atama yeni satıra taşınır, eski satır (kimse kalmazsa) iptal edilir.
 //  - CANCELLED   : ismi bu maçın HİÇBİR aktif satırında yok → gerçek iade
 //  - MOVED       : maç (contentKey) bu dosyada yok ama başka aktif dosyada var → arşive taşınma, sessiz
+//  - EXPIRED_WINDOW : maç BAŞLAMIŞ/oynanmış (tarih+saat, İstanbul) ve kişi dosyada/kadroda
+//                  artık görünmüyor → iptal SAYILMAZ, atama silinmez, bildirim gitmez
+//                  (federasyon oynanan maçı arşive taşıyor, 2026-10-26).
 export type AssignmentOutcomeKind = "KEPT" | "ROW_SHIFTED" | "CANCELLED" | "MOVED" | "EXPIRED_WINDOW";
 
 export interface AssignmentDecisionInput {
@@ -390,7 +386,7 @@ export interface AssignmentDecisionInput {
         // Bilinmiyorsa boş bırakılır, o zaman sadece ham eşitliğe düşülür.
         firstName?: string;
         lastName?: string;
-        match: { id: number; contentKey: string | null; macAdi: string; tarih: string };
+        match: { id: number; contentKey: string | null; macAdi: string; tarih: string; saat?: string | null };
     }[];
     // contentKey → o maça ait TÜM aktif ParsedMatch satırları (id + parse edilmiş MatchData).
     // Aynı contentKey'den birden fazla satır olabilir (kademeli doldurma / dosya revizyonu) — hepsi burada.
@@ -406,6 +402,8 @@ export interface AssignmentDecisionInput {
     // da hashlediği için bu küme "federasyonun en son yazdığı kadro hangi satır" sorusunun
     // tek güvenilir cevabı. Verilmezse eski (yalnızca kalabalığa bakan) davranışa düşülür.
     currentFileMatchKeys?: Set<string>;
+    // "Şimdi" — maçın başlayıp başlamadığını belirlemek için (testlerde sabitlenir).
+    now?: Date;
 }
 
 export interface AssignmentDecision {
@@ -415,6 +413,7 @@ export interface AssignmentDecision {
     toMatchId?: number;           // ROW_SHIFTED ise taşınacağı hedef satır
     macAdi: string;
     tarih: string;
+    saat?: string | null;
     contentKey: string | null;
 }
 
@@ -461,8 +460,11 @@ export function decideAssignmentOutcomes(input: AssignmentDecisionInput): Assign
             fromMatchId: a.match.id,
             macAdi: a.match.macAdi,
             tarih: a.match.tarih,
+            saat: a.match.saat ?? null,
             contentKey,
         };
+        // Maç başladıysa (oynandıysa) hiçbir koşulda "iptal" kararı verilmez.
+        const started = isMatchStarted(a.match.tarih, a.match.saat, input.now ?? new Date());
 
         // Geçiş dönemi kaydı — contentKey yoksa dokunma (eski davranış)
         if (!contentKey) {
@@ -476,12 +478,12 @@ export function decideAssignmentOutcomes(input: AssignmentDecisionInput): Assign
             if (input.movedContentKeys.has(contentKey)) {
                 // Başka aktif dosyada var → arşive / revizyon dosyasına taşınmış, sessiz
                 decisions.push({ ...base, kind: "MOVED" });
-            } else if (isPastRollingWindowMatch(a.match.tarih)) {
-                // TBF-FIBA-MİLLİ gibi dosyalar artık tüm sezonu değil sadece +1 haftalık
-                // kayan pencereyi gösteriyor (2026-10-06). Geçmiş tarihli bir maç bu
-                // pencereden çıktı diye "iptal" sayılmaz — federasyon maçı arşive
-                // taşıdığı için geçici olarak hiçbir aktif dosyada görünmeyebilir, arşiv
-                // senkronu onu bulunca zaten MOVED olur. Dokunma.
+            } else if (started) {
+                // Oynanmış maç dosyadan kalktı → federasyon arşive taşıdı (veya kayan
+                // pencere dosyası, 2026-10-06). İptal sayılmaz, dokunma. Eskiden burada
+                // sadece UTC GÜN karşılaştırması vardı: aynı gün oynanmış maç ve TRT
+                // gece yarısından sonra (UTC hâlâ önceki gün) kalkan maç "iptal" push'u
+                // alıyordu (2026-10-26 şikayeti).
                 decisions.push({ ...base, kind: "EXPIRED_WINDOW" });
             } else {
                 // Gelecek tarihli bir maç hiçbir aktif dosyada yok → gerçek iade
@@ -537,6 +539,12 @@ export function decideAssignmentOutcomes(input: AssignmentDecisionInput): Assign
             continue;
         }
 
+        // Maç oynandıysa kadrodan sonradan düşen isim iade değildir — dokunma.
+        if (started) {
+            decisions.push({ ...base, kind: "EXPIRED_WINDOW" });
+            continue;
+        }
+
         // Kullanıcı kanonik (son) kadroda YOK → federasyon çıkarmış / hiç eklememiş → gerçek iade.
         // (Eski/eksik bir satırda ismi hâlâ görünüyor olabilir ama son kadro esas alınır.)
         decisions.push({ ...base, kind: "CANCELLED" });
@@ -582,6 +590,7 @@ export async function detectAndMarkCancelledMatches(
                     contentKey: true,
                     macAdi: true,
                     tarih: true,
+                    saat: true,
                 },
             },
             user: {
@@ -684,7 +693,7 @@ export async function detectAndMarkCancelledMatches(
         if (!cancelledMap.has(d.fromMatchId)) {
             cancelledMap.set(d.fromMatchId, {
                 matchId: meta.id, matchKey: meta.matchKey, macAdi: meta.macAdi,
-                tarih: meta.tarih, affectedUserIds: [], contentKey: meta.contentKey,
+                tarih: meta.tarih, saat: meta.saat, affectedUserIds: [], contentKey: meta.contentKey,
             });
         }
         cancelledMap.get(d.fromMatchId)!.affectedUserIds.push(d.userId);
@@ -739,7 +748,7 @@ export async function detectAndMarkCancelledMatches(
                 }
             }
             shifted.push({
-                userId: d.userId, macAdi: d.macAdi, tarih: d.tarih, contentKey: d.contentKey,
+                userId: d.userId, macAdi: d.macAdi, tarih: d.tarih, saat: d.saat, contentKey: d.contentKey,
                 oldMatchData: activeRowDataById.get(d.fromMatchId) ?? null,
                 newMatchData: activeRowDataById.get(d.toMatchId!) ?? null,
             });

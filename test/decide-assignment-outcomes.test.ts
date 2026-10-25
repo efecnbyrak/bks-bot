@@ -5,7 +5,7 @@ import { MatchData } from "../src/lib/match-parser";
 
 function md(overrides: Partial<MatchData> = {}): MatchData {
     return {
-        mac_adi: "A - B", tarih: "07.09.2026", saat: "16:00", salon: "SALON",
+        mac_adi: "A - B", tarih: "07.09.2099", saat: "16:00", salon: "SALON",
         kategori: "U14", ligTuru: "Yerel Lig",
         hakemler: [], masa_gorevlileri: [], saglikcilar: [],
         istatistikciler: [], gozlemciler: [], sahaKomiserleri: [],
@@ -31,7 +31,7 @@ describe("decideAssignmentOutcomes", () => {
     test("kullanıcı hâlâ atandığı satırın kadrosunda → KEPT", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map([["ck1", [{ id: 100, data: md({ hakemler: ["AHMET YILMAZ"] }) }]]]),
         ));
         assert.equal(out[0].kind, "KEPT");
@@ -40,7 +40,7 @@ describe("decideAssignmentOutcomes", () => {
     test("kullanıcının ismi maçın HİÇBİR satırında yok → CANCELLED", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map([["ck1", [{ id: 100, data: md({ hakemler: ["BAŞKA KİŞİ"] }) }]]]),
         ));
         assert.equal(out[0].kind, "CANCELLED");
@@ -49,7 +49,7 @@ describe("decideAssignmentOutcomes", () => {
     test("maç işlenen dosyada yok + moved listesinde → MOVED (arşive taşınma, sessiz)", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map(),
             { currentFileContentKeys: new Set(), movedContentKeys: new Set(["ck1"]) },
         ));
@@ -79,7 +79,7 @@ describe("decideAssignmentOutcomes", () => {
     test("kademeli doldurma: kullanıcı eski satırda, kanonik (dolu) satır aynı dosyada → ROW_SHIFTED", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map([["ck1", [
                 { id: 100, data: md({ masa_gorevlileri: ["AHMET YILMAZ"] }) },
                 { id: 200, data: md({ hakemler: ["X", "Y"], masa_gorevlileri: ["AHMET YILMAZ", "Z"] }) },
@@ -92,7 +92,7 @@ describe("decideAssignmentOutcomes", () => {
     test("isim sırası ters (fuzzy nameMatches) — profil adı verilirse KEPT sayılır", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "EFE CAN BAYRAK", firstName: "EFE CAN", lastName: "BAYRAK",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map([["ck1", [{ id: 100, data: md({ hakemler: ["BAYRAK EFE CAN"] }) }]]]),
         ));
         assert.equal(out[0].kind, "KEPT");
@@ -101,7 +101,7 @@ describe("decideAssignmentOutcomes", () => {
     test("contentKey null (geçiş dönemi kaydı) → KEPT (dokunma)", () => {
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "AHMET YILMAZ",
-               match: { id: 100, contentKey: null, macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: null, macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map(),
         ));
         assert.equal(out[0].kind, "KEPT");
@@ -131,7 +131,7 @@ describe("decideAssignmentOutcomes", () => {
         const out = decideAssignmentOutcomes(input(
             people.map(p => ({
                 userId: p.userId, nameInSpreadsheet: p.name,
-                match: { id: 227821, contentKey: "ck-akademi", macAdi: "AKADEMİ", tarih: "07.09.2026" },
+                match: { id: 227821, contentKey: "ck-akademi", macAdi: "AKADEMİ", tarih: "07.09.2099" },
             })),
             new Map([["ck-akademi", [
                 { id: 227821, data: row227821 },
@@ -158,7 +158,7 @@ describe("decideAssignmentOutcomes", () => {
         const out = decideAssignmentOutcomes(input(
             people.map(p => ({
                 userId: p.userId, nameInSpreadsheet: p.name,
-                match: { id: 227821, contentKey: "ck-akademi", macAdi: "AKADEMİ", tarih: "07.09.2026" },
+                match: { id: 227821, contentKey: "ck-akademi", macAdi: "AKADEMİ", tarih: "07.09.2099" },
             })),
             new Map([["ck-akademi", [{ id: 228013, data: row228013 }]]]),
         ));
@@ -175,7 +175,7 @@ describe("decideAssignmentOutcomes", () => {
         // Yeni dosya (901): tam kadro — currentFileContentKeys'te var
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "ZEHRA AKAN",
-               match: { id: 221614, contentKey: "ckHafta", macAdi: "ÜMRANİYE - İGSK", tarih: "28.08.2026" } }],
+               match: { id: 221614, contentKey: "ckHafta", macAdi: "ÜMRANİYE - İGSK", tarih: "28.08.2099" } }],
             new Map([["ckHafta", [
                 { id: 221614, data: md({ masa_gorevlileri: ["ZEHRA AKAN"] }) },
                 { id: 222649, data: md({ hakemler: ["A", "B"], masa_gorevlileri: ["ZEHRA AKAN", "C", "D"] }) },
@@ -197,12 +197,12 @@ describe("decideAssignmentOutcomes", () => {
     // saf karar fonksiyonu burada zaten doğruydu, hata UYGULAMA adımındaydı (bkz. fix).
     test("gerçek vaka Ali Can Yılmaz (231266→231822) — çıkarılan kişi CANCELLED, kalanlar ROW_SHIFTED", () => {
         const rowEski = md({
-            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2026",
+            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2099",
             hakemler: ["ALİ CAN YILMAZ", "EMİR EREN"],
             masa_gorevlileri: ["ALPKAN HACIYAKUPOĞLU", "ALTAN CANDAN", "BERFİN DAĞ"],
         });
         const rowYeni = md({
-            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2026",
+            mac_adi: "DARÜŞŞAFAKA - İSTANBUL VARDAR (A)", tarih: "19.09.2099",
             hakemler: ["AYHAN CEM AKAN", "EMİR EREN"],
             masa_gorevlileri: ["ALPKAN HACIYAKUPOĞLU", "ALTAN CANDAN", "BERFİN DAĞ"],
             saglikcilar: ["NURGÜL DEMİR"], istatistikciler: ["ERSAN KIRAN", "HİLAL ÇİÇEK"],
@@ -249,7 +249,7 @@ describe("kanonik satır seçimi — dosyada fiilen bulunan satır kazanır", ()
     test("çıkarılan hakem → CANCELLED (eski satırda görünse bile)", () => {
         const out = decideAssignmentOutcomes({
             ...input([{ userId: 1, nameInSpreadsheet: "ŞEVKİ ENES CAN",
-                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }], rows),
             currentFileMatchKeys: inFile,
         });
         assert.equal(out[0].kind, "CANCELLED");
@@ -258,7 +258,7 @@ describe("kanonik satır seçimi — dosyada fiilen bulunan satır kazanır", ()
     test("kadroda kalan kişi eski satırda kayıtlıysa → yeni satıra ROW_SHIFTED", () => {
         const out = decideAssignmentOutcomes({
             ...input([{ userId: 2, nameInSpreadsheet: "HASAN DEVECİ",
-                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+                match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }], rows),
             currentFileMatchKeys: inFile,
         });
         assert.equal(out[0].kind, "ROW_SHIFTED");
@@ -268,7 +268,7 @@ describe("kanonik satır seçimi — dosyada fiilen bulunan satır kazanır", ()
     test("yeni satırda zaten kayıtlı kişi → KEPT", () => {
         const out = decideAssignmentOutcomes({
             ...input([{ userId: 3, nameInSpreadsheet: "İBRAHİM EMİR YEŞİL",
-                match: { id: 200, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }], rows),
+                match: { id: 200, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }], rows),
             currentFileMatchKeys: inFile,
         });
         assert.equal(out[0].kind, "KEPT");
@@ -279,7 +279,7 @@ describe("kanonik satır seçimi — dosyada fiilen bulunan satır kazanır", ()
         const az = md({ hakemler: ["HASAN DEVECİ"] });
         const out = decideAssignmentOutcomes(input(
             [{ userId: 1, nameInSpreadsheet: "ŞEVKİ ENES CAN",
-               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2026" } }],
+               match: { id: 100, contentKey: "ck1", macAdi: "A - B", tarih: "07.09.2099" } }],
             new Map([["ck1", [{ id: 100, data: kalabalik }, { id: 200, data: az }]]]),
         ));
         assert.equal(out[0].kind, "KEPT");
