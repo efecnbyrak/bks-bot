@@ -196,7 +196,7 @@ export async function resolveSyncFolderKeys(): Promise<string[]> {
     return keys;
 }
 
-// FORCE_SYNC=true ise jitter atlanır — elle tetiklemede kullanılır
+// FORCE_SYNC=true ise asgari sync aralığı atlanır — elle tetiklemede kullanılır
 export function isForceSync(): boolean {
     return process.env.FORCE_SYNC === "true";
 }

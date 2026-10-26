@@ -76,13 +76,17 @@ async function sendPushToUsers(
                 // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
                 // yönlendirme yapabilsin diye üç bildirim tipine de eklenen ortak alan.
                 data: { type: dataType, screen: "MATCHES", ...extraData },
+                // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
+                // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
                 android: {
+                    priority: "high",
                     notification: {
                         sound: "default",
                         channelId: "matches",
                     },
                 },
                 apns: {
+                    headers: { "apns-priority": "10", "apns-push-type": "alert" },
                     payload: {
                         aps: { sound: "default" },
                     },

@@ -45,6 +45,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
     throw new Error("Unreachable");
 }
 
+// İki sync arasında en az bu kadar saniye olmalı (bkz. runSync içindeki açıklama).
+const MIN_SYNC_INTERVAL_SEC = 50;
+
 export async function runSync(folderKey: string): Promise<RunSyncResult> {
     const runResult: RunSyncResult = { newAssignments: [], cancellations: [], shifted: [] };
 
@@ -61,17 +64,20 @@ export async function runSync(folderKey: string): Promise<RunSyncResult> {
     const startMs = Date.now();
     const errors: string[] = [];
 
-    // Jitter: son başarılı sync'ten beri [5,10) dk geçmediyse atla.
-    // FORCE_SYNC=true ise (elle tetikleme) jitter bypass edilir.
+    // Asgari aralık: son başarılı sync'ten beri MIN_SYNC_INTERVAL_SEC geçmediyse atla.
+    // 2026-10-26'ya kadar burada rastgele [5,10) dk bekleme vardı — tetikleyici 5 dk'da
+    // bir geldiği için maç bildirimleri 5-15 dk gecikiyordu. Bildirimlerin ~1-3 dk içinde
+    // gelmesi için tetikleyici 1 dk'ya indirildi; bu kısa sınır sadece art arda gelen
+    // iki tetiklemenin aynı işi iki kez yapmasını önler (eşzamanlılığı ayrıca kilit
+    // ve workflow'daki `concurrency` grubu engelliyor). FORCE_SYNC=true ise atlanmaz.
     const syncState = await db.workerSyncState.findUnique({ where: { folderKey } });
     if (syncState?.lastSuccessAt && !isForceSync()) {
-        const elapsedMin = (Date.now() - syncState.lastSuccessAt.getTime()) / 60000;
-        const requiredMin = 5 + Math.random() * 5; // [5, 10)
-        if (elapsedMin < requiredMin) {
-            logger.info("Jitter: henüz erken — sync atlandı", {
+        const elapsedSec = (Date.now() - syncState.lastSuccessAt.getTime()) / 1000;
+        if (elapsedSec < MIN_SYNC_INTERVAL_SEC) {
+            logger.info("Asgari aralık dolmadı — sync atlandı", {
                 folderKey,
-                elapsedMin: Math.round(elapsedMin * 10) / 10,
-                requiredMin: Math.round(requiredMin * 10) / 10,
+                elapsedSec: Math.round(elapsedSec),
+                requiredSec: MIN_SYNC_INTERVAL_SEC,
             });
             return runResult;
         }

@@ -143,11 +143,25 @@ sabit tarife alanı/kartı gerekmedi.
 koşulsuz yeniden okunup yeniden yazılıyor (satır sayısı küçük — ~15-150 satır — maliyeti
 yok). `upsertDriveFile`'a sahte bir dosya kaydı (`id: "sheet:<spreadsheetId>"`) veriliyor ki
 `ParsedMatch.driveFileId` ilişkisi ve `detectAndMarkCancelledMatches` aynı mekanizmayı
-kullanabilsin. Kilit/jitter kendi sözde klasör anahtarıyla (`"tbf-milli-sheets"`) çalışır,
+kullanabilsin. Kilit/asgari-aralık kendi sözde klasör anahtarıyla (`"tbf-milli-sheets"`) çalışır,
 diğer klasörlerden bağımsızdır.
 
 **Teşhis**: `scripts/dry-run-tbf-milli.ts` (SALT OKUMA) iki sheet'i okuyup parse sonucunu
 basar, DB'ye yazmaz — sheet başlıkları değişirse (sütun sırası/adı) önce bununla kontrol et.
+
+## Senkron Sıklığı ve Anlık Push (2026-10-26)
+
+Hedef: maç ataması push'u değişiklikten ~1-3 dk içinde telefonda (ücretsiz kalarak — repo
+PUBLIC, GitHub Actions dakikası sınırsız; Supabase'in compute-saat limiti yok).
+- cron-job.org `repository_dispatch` tetikleyicisi **1 dakikada bir** (panelden ayarlanır).
+- `orchestrator.ts` → `MIN_SYNC_INTERVAL_SEC = 50`: eski rastgele [5,10) dk jitter KALDIRILDI;
+  bu sınır yalnızca art arda gelen iki tetiklemenin aynı işi iki kez yapmasını önler.
+- `sync-current.yml` → `concurrency: { group: sync-current, cancel-in-progress: false }`:
+  çalışma sürerken gelen tetikleme sıraya girer (en fazla 1 bekleyen), üst üste binme yok.
+- `push-sender.ts`: `android.priority: "high"` + APNs `apns-priority: 10` /
+  `apns-push-type: alert` açıkça yazılı (web `lib/push-notifications.ts` ile aynı).
+Alt sınır GitHub runner açılışı + `npm ci`/build (~40 sn - 3 dk); daha hızlısı ücretli/
+sürekli açık bir sunucu gerektirir.
 
 ## Aktif Sezonun ARŞİV Kopyası Atlanır (2026-10-01)
 

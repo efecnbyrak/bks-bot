@@ -2,7 +2,7 @@ name: Sync Current Season
 
 on:
   # GitHub'ın kendi schedule tetikleyicisi yoğunlukta gecikebiliyor/atlanabiliyor
-  # (bilinen bir GitHub Actions davranışı). Bunun yerine cron-job.org'un 5 dk'da bir
+  # (bilinen bir GitHub Actions davranışı). Bunun yerine cron-job.org'un 1 dk'da bir
   # attığı POST isteğiyle bu event tetikleniyor — tek ve güvenilir zamanlama kaynağı.
   # schedule tetikleyicisi bilinçli olarak KALDIRILDI: iki ayrı tetikleyicinin aynı
   # anda çalışması, acquireLock'taki check-then-act (atomik olmayan) kilit deseninde
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       force_sync:
-        description: 'Jitter atla ve zorla sync yap'
+        description: 'Asgari aralığı atla ve zorla sync yap'
         required: false
         default: 'false'
         type: choice
@@ -23,6 +23,13 @@ on:
         default: 'false'
         type: choice
         options: ['false', 'true']
+
+# Tetikleyici dakikada bir geliyor (cron-job.org). Bir çalışma sürerken gelen yeni
+# tetikleme iptal edilmez, sıraya girer (en fazla 1 bekleyen) — üst üste binme yok,
+# biten çalışmanın ardından en güncel veriyle bir sonraki hemen başlar.
+concurrency:
+  group: sync-current
+  cancel-in-progress: false
 
 jobs:
   sync:
