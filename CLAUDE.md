@@ -81,8 +81,8 @@ boş/geçersizse `getCurrentSeasonKey()`'e fail-open düşer. `resolveSyncFolder
 içindeki iki çağrı noktası (`current` klasörü + `latest-season` beklenen anahtar
 tespiti) `resolveCurrentSeasonKey()`'e geçirildi. **Yeni bir yerde sezon anahtarı
 hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullanılmalı**
-— aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Detay:
-`bks-web-system/docs/bot/YAPILACAKLAR.md` TAMAMLANANLAR.
+— aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Geçmiş:
+`git log` (bks-web-system `docs/bot/YAPILACAKLAR.md`).
 
 ## Excel Hücresi Okuma — UTC ZORUNLU (2026-10-01)
 
@@ -336,8 +336,8 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   eklendi (`src/db-writer.ts`, "2.5" adımı). Regresyon testi:
   `test/decide-assignment-outcomes.test.ts` → "gerçek vaka Ali Can Yılmaz". Bu bug
   nedeniyle birikmiş geçmiş veri `scripts/consolidate-active-contentkey-duplicates.ts
-  apply-with-removals` ile temizlendi (bkz. `docs/bot/YAPILACAKLAR.md` madde 6,
-  bks-web-system reposunda).
+  apply-with-removals` ile temizlendi (geçmiş: bks-web-system
+  `git log -- docs/bot/YAPILACAKLAR.md`).
 - **`NOTIFY_DRY_RUN=1`**: FAZ 2 kararları (atama taşıma, satır iptali, push gönderimi)
   uygulanmaz, sadece loglanır. `upsertDriveFile` / `upsertParsedMatches` normal çalışır
   (matchId üretmeleri gerekiyor). **`buildUserAssignments`'ın (`src/user-matcher.ts`)
@@ -347,7 +347,7 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir (cron turları
   etkilenmez). **Neden `sync-archives-once.yml`'e de eklendi:** 2026-09-26'da bu
   workflow önizlemesiz `sync_mode: archive-full` ile elle çalıştırılıp production'a
-  53.284 satır yazmıştı (bkz. `docs/bot/YAPILACAKLAR.md` madde 5 detayı).
+  53.284 satır yazmıştı (bkz. `docs/bot/YAPILACAKLAR.md` → "Kalıcı notlar").
 - **`evaluateCancellationSafety` sigortası**: bir dosyada iptal adayı ≥25 atama VE dosyanın
   aktif atamalarının >%40'ıysa (başlık bozulması / kolon kayması şüphesi) hiçbir iptal
   yazılmaz, `logger.error` ile loglanır. Eşiği düşürmeden önce günlük normal iade hacmini
@@ -384,8 +384,8 @@ logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `
 > `DELETED (dupe)` (report↔apply arası bot sync'i atamaları zaten kanoniğe taşımıştı, `apply`
 > iptal satırlarındaki kopyaları temizledi). Doğrulama: iptal olmuş kanonik 0, kanonikte
 > aktif atama 309, ikinci `report` = 0 (idempotent). Geri alma logu:
-> `E:\tmp\A1-undo-20260910T175411.json`. Detay: `bks-web-system/docs/web/YAPILACAKLAR.md`
-> "✅ 0.A-TAMAMLANDI — 2026-09-10: A1".
+> `E:\tmp\A1-undo-20260910T175411.json`. Geçmiş: bks-web-system `git log -- docs/web/YAPILACAKLAR.md`
+> (2026-09-10, A1).
 | `detect-key-mismatch-duplicates.ts` | Salt okuma — isim/tarih değişimi kaynaklı farklı-contentKey ikizi | — |
 | `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
