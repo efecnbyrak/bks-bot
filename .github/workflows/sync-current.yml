@@ -41,9 +41,20 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      # Hız (2026-10-27): node_modules (+ içindeki üretilmiş Prisma client) önbellekte.
+      # Anahtar package-lock + schema.prisma hash'i — biri değişirse önbellek tutmaz,
+      # npm ci + prisma generate baştan çalışır (eski client ile yazma riski yok).
+      - name: Restore node_modules cache
+        id: nm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: nm-${{ runner.os }}-node22-${{ hashFiles('package-lock.json', 'prisma/schema.prisma') }}
       - name: Install dependencies
+        if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npm ci
       - name: Generate Prisma client
+        if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npx prisma generate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
