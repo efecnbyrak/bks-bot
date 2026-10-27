@@ -904,6 +904,21 @@ export async function createCancellationAnnouncements(
                 sentCount: match.affectedUserIds.length,
             },
         });
+
+        // Admin Duyurular ekranı bu otomatik duyuruları göstermiyor; yöneticinin
+        // görebileceği iz kaydı web'deki Loglar sayfasına (audit_logs) düşer.
+        // Log yazılamazsa duyuru zaten gitti, senkronu düşürmüyoruz.
+        try {
+            await db.auditLog.create({
+                data: {
+                    userId: null,
+                    action: "MATCH_CANCELLATION_NOTICE",
+                    details: `${match.tarih} ${match.macAdi} — ${match.affectedUserIds.length} kişiye iade/iptal bildirimi (kullanıcılar: ${match.affectedUserIds.join(",")})`,
+                },
+            });
+        } catch (err: any) {
+            logger.warn("İptal bildirimi log kaydı yazılamadı", { macAdi: match.macAdi, error: err?.message });
+        }
     }
 
     if (cancelledMatches.length > 0) {
