@@ -30,10 +30,22 @@ export function computeMatchKey(match: MatchData): string {
 // yüzden o dosyada iade tespiti FAZ 1 sigortası tarafından tamamen bloke oluyordu.
 // Web tarafındaki ikiz (`lib/matches/match-utils.ts` → `contentKey`) AYNI turda
 // değişti — biri değişirse diğeri de değişmek zorunda.
+// Hash'lenmeden önceki ham anahtar — web `lib/matches/match-utils.ts` → `contentKey`
+// ile BİREBİR aynı string'i üretmek zorunda (ikiz, testlerde aynı fixture'larla kilitli).
+// İç boşluklar tekleştirilir (2026-10-28, web ile eşitlendi). 3x3 istisnası: aynı
+// ad/gün/saatte birden çok 3x3 maçı ayrı maçtır (farklı hakem atanıyor) — satır
+// numarası biliniyorsa anahtara eklenir, diğer maçların anahtarı değişmez.
+export function contentKeyRaw(match: Pick<MatchData, "mac_adi" | "tarih" | "saat" | "kaynak_satir">): string {
+    const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const base = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}`;
+    // Web `isThreeXThreeMatch` (lib/payment-category.ts) ikizi.
+    const is3x3 = (match.mac_adi ?? "").trim().toLowerCase() === "3x3 - 3x3";
+    if (is3x3 && match.kaynak_satir != null) return `${base}|#${match.kaynak_satir}`;
+    return base;
+}
+
 export function computeContentKey(match: MatchData): string {
-    const norm = (s: string) => (s ?? "").trim().toLowerCase();
-    const raw = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}`;
-    return crypto.createHash("sha256").update(raw).digest("hex").substring(0, 32);
+    return crypto.createHash("sha256").update(contentKeyRaw(match)).digest("hex").substring(0, 32);
 }
 
 // "20 Aralık 2025 Cumartesi" gibi uzun Türkçe tarihler bazı kaynak dosyalarda

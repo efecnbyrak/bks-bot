@@ -298,6 +298,9 @@ ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır sili
 Federasyon Excel'de kadroyu **kademeli** dolduruyor (önce masa → sonra gözlemci → ... →
 en son hakemler). `matchKey` personel içerdiği için her adım yeni bir `ParsedMatch` satırı
 açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
+`computeContentKey` = sha256(`contentKeyRaw`); `contentKeyRaw` web `lib/matches/match-utils.ts` →
+`contentKey` ile BİREBİR aynı string'i üretir (iç boşluk tekleştirme; 3x3 maçında `|#kaynak_satir`) —
+`test/content-key-twin.test.ts` web'deki ikiziyle aynı fixture'larla kilitler.
 
 - **İptal/güncelleme kararı asla tek bir satıra bakılarak verilmez.** Bir kullanıcının
   maçtan çıkıp çıkmadığı, o `contentKey`'in **tüm aktif satırlarının** kadrosuna bakılarak
@@ -398,6 +401,7 @@ logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `
 | `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
 | `repair-salon-rename-duplicates.ts` | Salon adı varyasyonu (`PAIRS` dizisinde elle enumerate edilmiş çiftler) | `Salon adı varyasyonu — mükerrer stale kayıt temizliği` |
+| `backfill-contentkey-v2.ts` | contentKey formülü değişince (2026-10-28: iç boşluk tekleştirme + 3x3'te `|#kaynakSatir`) mevcut hash'leri yeniler. `report` (varsayılan, salt okuma: değişen satır, bölünen/birleşen aktif grup) / `apply` (sadece `contentKey` yazar) | — |
 | `backfill-turkish-tarihdate.ts` | `tarihDate: NULL` satırlar (uzun Türkçe tarih formatı parse edilemediği için, bkz. yukarıdaki "Tarih Ayrıştırma" bölümü). Sadece `tarihDate` UPDATE edilir, satır silinmez/iptal edilmez | — (cancelReason yok, sadece tarih dolduruluyor) |
 
 Yeni bir mükerrer deseni çıkarsa: önce hangi alanın `contentKey`'i değiştirdiğini tespit et
