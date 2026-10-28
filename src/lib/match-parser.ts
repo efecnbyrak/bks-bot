@@ -9,6 +9,8 @@ export interface MatchData {
     // Yerel Lig dosyalarındaki "GRUP" sütunu (ör. "A GRUBU") — kategoriden ayrı.
     // ParsedMatch'te karşılığı yok; web tarafı Atamalar sayfasında kullanıyor.
     grup?: string;
+    // Özel Lig'de ORGANİZASYON'un altındaki KATEGORİ (ör. "BE-BK", "U12").
+    altKategori?: string;
     hafta?: number;
     sezon?: string;
     ligTuru: string;
@@ -339,12 +341,16 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
                     if (!colMap["saat"]) colMap["saat"] = []; colMap["saat"].push(j);
                 } else if (c.includes("salon") || c.includes("spor")) {
                     if (!colMap["salon"]) colMap["salon"] = []; colMap["salon"].push(j);
-                } else if (c.includes("organizasyon") || c === "org" || c.includes("kategori")) {
-                    // Yerel Lig haftalık dosyalarında bu sütunun başlığı "KATEGORİ"
-                    // (ör. "U16EA"), Özel Lig dosyalarında "ORGANİZASYON". Alias
-                    // eklenmeden önce KATEGORİ tanınmıyordu ve `kategori` alanına sekme
-                    // adı ("1 hafta") yazılıyordu — 808 maçın tamamı böyleydi (2026-09-30).
+                } else if (c.includes("organizasyon") || c === "org") {
+                    // Özel Lig / Okul dosyalarında üst kategori "ORGANİZASYON"
+                    // (ör. "4. KAMU OYUNLARI GSİM").
                     if (!colMap["organizasyon"]) colMap["organizasyon"] = []; colMap["organizasyon"].push(j);
+                } else if (c.includes("kategori")) {
+                    // Yerel Lig haftalık dosyalarında kategori sütunu "KATEGORİ" (ör. "U16EA").
+                    // Özel Lig'de ORGANİZASYON'un yanında ayrı bir KATEGORİ (ör. "BE-BK") de
+                    // var — o zaman alt kategori olur (2026-10-28). Alias eklenmeden önce
+                    // KATEGORİ tanınmıyordu ve `kategori` alanına sekme adı yazılıyordu.
+                    if (!colMap["kategoriCol"]) colMap["kategoriCol"] = []; colMap["kategoriCol"].push(j);
                 } else if (c.includes("grup")) {
                     // "GRUP" (ör. "A GRUBU") — kategoriden AYRI sütun, kategori yerine geçmez.
                     if (!colMap["grup"]) colMap["grup"] = []; colMap["grup"].push(j);
@@ -393,12 +399,13 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
         const salonCols = colMap["salon"] || [];
         const macCols = colMap["mac"] || [];
         const organizasyonCols = colMap["organizasyon"] || [];
+        const kategoriCols = colMap["kategoriCol"] || [];
         const grupCols = colMap["grup"] || [];
 
         const usedColsSet = new Set([
             ...hakemCols, ...masaCols, ...saglikCols, ...istatistikCols,
             ...gozlemciCols, ...sahaKomiseriCols, ...tarihCols, ...saatCols, ...salonCols, ...macCols,
-            ...organizasyonCols, ...grupCols,
+            ...organizasyonCols, ...kategoriCols, ...grupCols,
         ]);
 
         let lastTarih = "";
@@ -486,10 +493,19 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
             if (salon && salon.length > 2) lastSalon = salon;
             else if (!salon && lastSalon) salon = lastSalon;
 
+            // ORGANİZASYON varsa o ana kategori, KATEGORİ alt kategori olur (Özel Lig).
+            // Yoksa KATEGORİ ana kategoridir (Yerel Lig) — ödeme akışı aynı kalsın diye.
             let rowKategori = sheetCategory;
+            let rowAltKategori = "";
+            const orgVal = organizasyonCols.length ? (row[organizasyonCols[0]] || "").trim() : "";
+            const katVal = kategoriCols.length ? (row[kategoriCols[0]] || "").trim() : "";
             if (organizasyonCols.length) {
-                const orgVal = (row[organizasyonCols[0]] || "").trim();
+                // ORGANİZASYON hücresi boşsa eskisi gibi sekme adına düşer (KATEGORİ'ye
+                // değil) — yoksa ödeme tarifesine yeni, sahte kategoriler sızar.
                 if (orgVal.length > 1) rowKategori = orgVal;
+                rowAltKategori = katVal;
+            } else if (katVal.length > 1) {
+                rowKategori = katVal;
             }
 
             let rowGrup = "";
@@ -497,7 +513,7 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
 
             allMatches.push({
                 mac_adi: macAdi, tarih, saat, salon,
-                kategori: rowKategori, grup: rowGrup || undefined,
+                kategori: rowKategori, altKategori: rowAltKategori || undefined, grup: rowGrup || undefined,
                 hafta: fileMeta.hafta, ligTuru: fileMeta.ligTuru,
                 hakemler, masa_gorevlileri: masaGorevlileri, saglikcilar, istatistikciler, gozlemciler,
                 sahaKomiserleri,

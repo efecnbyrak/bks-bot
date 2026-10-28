@@ -197,6 +197,8 @@ model ParsedMatch {
   kaynakSekme     String?
   kaynakSatir     Int?
   grup            String?
+  // Özel Lig: ORGANİZASYON altındaki KATEGORİ (ör. "BE-BK"). Yerel Lig'de boş.
+  altKategori     String?
 
   hakemler        String[]
   masaGorevlileri String[]

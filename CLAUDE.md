@@ -183,8 +183,16 @@ dosyalarında kategori sütununun başlığı `KATEGORİ` (ör. "U16EA"), Özel 
 `rowKategori` SEKME ADINA ("1 hafta") düşüyordu — DB'deki 808 Yerel Lig maçının tamamı
 böyle yazılmıştı. Ayrı bir `GRUP` sütunu ("A GRUBU") da tamamen kayboluyordu.
 
-Artık `kategori` ve `grup` başlıkları tanınıyor; `grup` ayrı bir alan
-(`MatchData.grup`, ParsedMatch'te tutulmaz — web tarafı `GameAssignment.grup`'a yazıyor).
+Artık `kategori` ve `grup` başlıkları tanınıyor; `grup` ayrı bir alan (`MatchData.grup` →
+`ParsedMatch.grup`).
+
+**Özel Lig alt kategorisi (2026-10-28):** Özel Lig dosyasında ORGANİZASYON (ör. "4. KAMU
+OYUNLARI GSİM") ile ayrı bir KATEGORİ (ör. "BE-BK") sütunu birlikte var. Eskiden ikisi tek
+kovaya düşüyor, KATEGORİ kayboluyordu. Artık ORGANİZASYON sütunu varsa `kategori`'ye,
+KATEGORİ `altKategori`'ye (`ParsedMatch.altKategori`) yazılır; ORGANİZASYON hücresi boşsa
+eskisi gibi sekme adına düşer (KATEGORİ'ye değil — ödeme tarifesine sahte kategori sızmasın).
+ORGANİZASYON sütunu yoksa (Yerel Lig, TBF-Milli) KATEGORİ yine `kategori`'dir. Web Atamalar
+Özel Lig zorluğunu bu iki alandan okur. Web `lib/match-parser.ts` aynı değişikliği taşır.
 
 **Yeni bir kaynak dosya formatı geldiğinde başlıkları TAHMİN ETME.** Web reposundaki
 `scripts/inspect-drive-headers.ts` (salt okuma) gerçek başlık satırını yazdırır:
