@@ -139,9 +139,17 @@ kategori neyse sisteme onu alacaksın" (2026-10-20). Web tarafında bks-web-syst
 dinamik `kategoriler[]` ödeme akışı (`lib/matches/fee.ts`) bunu otomatik yakalıyor, ek bir
 sabit tarife alanı/kartı gerekmedi.
 
-**Bu kaynak Drive-dosya değişim tespitine (`detectChanges`) GİRMİYOR** — her sync'te
-koşulsuz yeniden okunup yeniden yazılıyor (satır sayısı küçük — ~15-150 satır — maliyeti
-yok). `upsertDriveFile`'a sahte bir dosya kaydı (`id: "sheet:<spreadsheetId>"`) veriliyor ki
+**Bu kaynak Drive-dosya değişim tespitine (`detectChanges`) GİRMİYOR** — kendi değişim
+tespiti var (HIZ-2, 2026-10-31): her sync'te iki sheet yine okunur ama sekmenin parmak izi
+(`src/lib/tbf-milli-fingerprint.ts` → `computeTabFingerprint` = sha256(sürüm + sezon anahtarı +
+sezon kesimi + başlıklar + ham satırlar)) `DriveFile.lastProcessedMd5`'teki (sahte dosya
+`sheet:<id>`) son başarılı izle aynıysa parse/atama/iptal taraması ATLANIR (eskiden her
+çalışma ~120 sn, 518 atama yeniden kuruluyordu). İz SADECE işlem hatasız bitince yazılır
+(`markDriveFileFingerprint`); `upsertDriveFile` başta kolonu null'a çektiği için yarıda kalan
+çalışma bir sonrakinde tam işlenir. İz okunamazsa tam işleme (eski davranış). `archive-full`
+modu veya `FORCE_SYNC=true` atlamayı kapatır. Parse/atama mantığı değişirse
+`TBF_MILLI_FINGERPRINT_VERSION` artırılır (yoksa değişmeyen sheet yeni kuralla işlenmez).
+Drive dosyalarındaki gibi, sonradan kaydolan bir kullanıcı ancak sheet değişince eşleşir. `upsertDriveFile`'a sahte bir dosya kaydı (`id: "sheet:<spreadsheetId>"`) veriliyor ki
 `ParsedMatch.driveFileId` ilişkisi ve `detectAndMarkCancelledMatches` aynı mekanizmayı
 kullanabilsin. Kilit/asgari-aralık kendi sözde klasör anahtarıyla (`"tbf-milli-sheets"`) çalışır,
 diğer klasörlerden bağımsızdır.

@@ -133,6 +133,25 @@ export async function upsertDriveFile(
     return record.id;
 }
 
+// TBF/Milli sheet sekmelerinin "son başarılı işlenen içerik" parmak izi. Drive
+// dosyalarında lastProcessedMd5 md5'i tutar; sheet sözde dosyalarında (md5 yok)
+// aynı kolon sekme parmak izi için kullanılıyor. upsertDriveFile bu kolonu her
+// işlemin başında null'a çeker, işlem başarıyla bitince markDriveFileFingerprint yazar.
+export async function getDriveFileFingerprint(driveFileId: string): Promise<string | null> {
+    const row = await db.driveFile.findUnique({
+        where: { driveFileId },
+        select: { lastProcessedMd5: true },
+    });
+    return row?.lastProcessedMd5 ?? null;
+}
+
+export async function markDriveFileFingerprint(driveFileDbId: number, fingerprint: string): Promise<void> {
+    await db.driveFile.update({
+        where: { id: driveFileDbId },
+        data: { lastProcessedMd5: fingerprint },
+    });
+}
+
 const BATCH_SIZE = 500;
 
 export async function upsertParsedMatches(

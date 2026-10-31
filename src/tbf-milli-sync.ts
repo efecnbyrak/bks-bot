@@ -29,9 +29,12 @@ import {
     CancelledMatchInfo,
     ShiftedAssignmentInfo,
     parseTarihDate,
+    getDriveFileFingerprint,
+    markDriveFileFingerprint,
 } from "./db-writer";
 import { buildUserAssignments, NewAssignmentInfo } from "./user-matcher";
-import { getSeasonCutoffDate, resolveCurrentSeasonKey } from "./config";
+import { getSeasonCutoffDate, resolveCurrentSeasonKey, getSyncMode, isForceSync } from "./config";
+import { computeTabFingerprint, shouldSkipTab } from "./lib/tbf-milli-fingerprint";
 import { logger } from "./logger";
 import { DriveSpreadsheet } from "./lib/google-drive";
 
@@ -58,10 +61,40 @@ async function processTab(
     tab: SheetTabRaw,
     spreadsheetId: string,
     result: TbfMilliSyncResult
-): Promise<{ matchesUpserted: number; assignmentsBuilt: number }> {
+): Promise<{ matchesUpserted: number; assignmentsBuilt: number; skipped: boolean }> {
     if (tab.rows.length < 2) {
         logger.info("TBF/Milli sheet sekmesi boş, atlandı", { spreadsheetId, tab: tab.tabTitle });
-        return { matchesUpserted: 0, assignmentsBuilt: 0 };
+        return { matchesUpserted: 0, assignmentsBuilt: 0, skipped: false };
+    }
+
+    // Sezon anahtarı ve kesim tarihi hem parmak izine hem aşağıdaki yazma adımlarına
+    // lazım — bir kez okuyup ikisinde de kullanıyoruz.
+    const seasonKey = await resolveCurrentSeasonKey();
+    const seasonCutoff = await getSeasonCutoffDate();
+    const pseudoFileId = `sheet:${spreadsheetId}`;
+
+    // İçerik değişmediyse sekmeyi baştan işlemeyi (parse + ~500 atama + iptal taraması)
+    // atlıyoruz. Parmak izi okuma/hesaplama hata verirse eski davranışa (tam işleme) düşer.
+    let fingerprint: string | null = null;
+    let prevFingerprint: string | null = null;
+    try {
+        fingerprint = computeTabFingerprint(tab, {
+            seasonKey,
+            cutoffIso: seasonCutoff.toISOString(),
+        });
+        prevFingerprint = await getDriveFileFingerprint(pseudoFileId);
+    } catch (err: any) {
+        logger.warn("TBF/Milli parmak izi okunamadı, sekme tam işlenecek", {
+            spreadsheetId, tab: tab.tabTitle, error: err?.message,
+        });
+        prevFingerprint = null;
+    }
+
+    // Drive dosyalarındaki zorlama kuralıyla aynı (orchestrator.ts)
+    const force = getSyncMode() === "archive-full" || isForceSync();
+    if (shouldSkipTab(prevFingerprint, fingerprint, force)) {
+        logger.info("TBF/Milli sheet değişmedi, atlandı", { spreadsheetId, tab: tab.tabTitle });
+        return { matchesUpserted: 0, assignmentsBuilt: 0, skipped: true };
     }
 
     const workbook = await buildInMemoryWorkbook(tab);
@@ -74,27 +107,35 @@ async function processTab(
 
     // Sheet'in kendisini sözde bir "Drive dosyası" gibi kaydediyoruz — ParsedMatch.driveFileId
     // ilişkisi ve detectAndMarkCancelledMatches aynı mekanizmayı bu sahte dosya kimliğiyle kullanabilsin diye.
-    // Gerçek bir Drive dosyası olmadığı için md5Checksum/modifiedTime yok; bu kaynak her
-    // sync'te koşulsuz yeniden okunup yeniden yazılıyor (satır sayısı küçük, maliyeti yok).
+    // Gerçek bir Drive dosyası olmadığı için md5Checksum/modifiedTime yok; içerik değişikliğini
+    // sekme parmak iziyle (lastProcessedMd5 kolonu) yakalıyoruz: değişmeyen sekme atlanır,
+    // değişen sekme baştan okunup yeniden yazılır.
     const pseudoFile: DriveSpreadsheet = {
-        id: `sheet:${spreadsheetId}`,
+        id: pseudoFileId,
         name: `${fileName} (${tab.tabTitle})`,
         mimeType: "application/vnd.google-apps.spreadsheet",
     };
+    // DİKKAT (sıralama bilinçli): upsertDriveFile lastProcessedMd5'i null'a çeker. Parmak izini
+    // ancak işlemin EN SONUNDA yazıyoruz; arada bir hata fırlarsa kolon null kalır ve bir
+    // sonraki çalışma sekmeyi tam işler — yarım kalan işlem asla "güncel" sayılmaz.
     const driveFileDbId = await upsertDriveFile(pseudoFile, TBF_MILLI_FOLDER_KEY, matches.length);
 
-    if (matches.length === 0) return { matchesUpserted: 0, assignmentsBuilt: 0 };
+    if (matches.length === 0) {
+        if (fingerprint) await markDriveFileFingerprint(driveFileDbId, fingerprint);
+        return { matchesUpserted: 0, assignmentsBuilt: 0, skipped: false };
+    }
 
     // Sezon kesimi — web'in sildiği eski sezon verisi burada da geri gelmesin
     // (orchestrator.ts'teki aynı kural, bkz. CLAUDE.md Prisma Kuralları).
-    const seasonCutoff = await getSeasonCutoffDate();
     matches = matches.filter(m => {
         const d = parseTarihDate(m.tarih);
         return !(d && d < seasonCutoff);
     });
-    if (matches.length === 0) return { matchesUpserted: 0, assignmentsBuilt: 0 };
+    if (matches.length === 0) {
+        if (fingerprint) await markDriveFileFingerprint(driveFileDbId, fingerprint);
+        return { matchesUpserted: 0, assignmentsBuilt: 0, skipped: false };
+    }
 
-    const seasonKey = await resolveCurrentSeasonKey();
     const matchIds = await upsertParsedMatches(matches, driveFileDbId, seasonKey);
 
     const { assignmentCount, newAssignments } = await buildUserAssignments(matches, matchIds);
@@ -104,7 +145,10 @@ async function processTab(
     result.cancellations.push(...scan.cancelled);
     result.shifted.push(...scan.shifted);
 
-    return { matchesUpserted: matchIds.length, assignmentsBuilt: assignmentCount };
+    // Her şey hatasız bittiyse parmak izini kaydet (bkz. yukarıdaki sıralama notu).
+    if (fingerprint) await markDriveFileFingerprint(driveFileDbId, fingerprint);
+
+    return { matchesUpserted: matchIds.length, assignmentsBuilt: assignmentCount, skipped: false };
 }
 
 export async function runTbfMilliSync(): Promise<TbfMilliSyncResult> {
@@ -128,6 +172,7 @@ export async function runTbfMilliSync(): Promise<TbfMilliSyncResult> {
     const errors: string[] = [];
     let matchesUpserted = 0;
     let assignmentsBuilt = 0;
+    let filesChanged = 0;
     let success = false;
 
     try {
@@ -136,14 +181,17 @@ export async function runTbfMilliSync(): Promise<TbfMilliSyncResult> {
         const currentStats = await processTab(current, currentId, result);
         matchesUpserted += currentStats.matchesUpserted;
         assignmentsBuilt += currentStats.assignmentsBuilt;
+        if (!currentStats.skipped) filesChanged++;
 
         const archiveStats = await processTab(archive, archiveId, result);
         matchesUpserted += archiveStats.matchesUpserted;
         assignmentsBuilt += archiveStats.assignmentsBuilt;
+        if (!archiveStats.skipped) filesChanged++;
 
         success = true;
         logger.info("TBF/Milli sync tamamlandı", {
-            matchesUpserted, assignmentsBuilt, durationMs: Date.now() - startMs,
+            matchesUpserted, assignmentsBuilt, filesChanged, skippedTabs: 2 - filesChanged,
+            durationMs: Date.now() - startMs,
         });
     } catch (err: any) {
         const errMsg = err?.message || "Bilinmeyen hata";
@@ -156,7 +204,7 @@ export async function runTbfMilliSync(): Promise<TbfMilliSyncResult> {
             syncType: TBF_MILLI_FOLDER_KEY,
             folderKey: TBF_MILLI_FOLDER_KEY,
             filesChecked: 2,
-            filesChanged: 2,
+            filesChanged,
             matchesUpserted,
             assignmentsBuilt,
             durationMs: Date.now() - startMs,
