@@ -299,7 +299,11 @@ ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır sili
    tarih/saat/salon değişimi; boş yere ekleme (ilk dolum) ve yerine kimse yazılmadan çıkarma
    bildirim ÜRETMEZ; maçta kalan herkese gider. Başlık/metin `src/lib/notification-text.ts`
    (başlıkta takım adı yok, gövdede maçın tüm bilgisi + görevliler alt alta; masa koltuk
-   adları web `lib/matches/official-roles.ts` → `seatLabels` ile SYNC). Push'u
+   adları web `lib/matches/official-roles.ts` → `seatLabels` ile SYNC). **Koltuk adı (Baş
+   Hakem, Sayı Görevlisi…) sadece grup TAM doluyken yazılır** (`isGroupFull`): ayrıştırıcı boş
+   hücreleri attığı için Baş Hakem boş + Yardımcı dolu olunca Yardımcı listenin başına kayıyor;
+   eksik grupta genel ad ("Hakem", "Masa Görevlisi") yazılır, hakem koltuk değişimi satırı da
+   üretilmez. Ayrıştırıcıda boşluk korunmadı — matchKey hakem/masa listesini hash'liyor. Push'u
    `push-sender.ts` → `sendMatchPush` atar. `messaging/invalid-argument` artık ölü token
    SAYILMAZ (payload hatasında sağlam token'lar siliniyordu; web ikizi de değişti).
    `match_notification_outbox`'a SADECE bu repo yazar; şema web reposunda.

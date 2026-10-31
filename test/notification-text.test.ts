@@ -74,4 +74,10 @@ describe("bildirim metinleri", () => {
         assert.equal(t.title, "📝 Maçınız Güncellendi");
         assert.equal(t.body.split("\n")[0], "🔁 Baş Hakem: X yerine ALİ VELİ geldi");
     });
+    test("eksik grupta görevli listesi genel adla yazılır", () => {
+        const lines = matchDetailLines(md({ hakemler: ["CAN ER"], masa_gorevlileri: ["M1", "M2"] }));
+        assert.ok(lines.includes("• Hakem: CAN ER"));
+        assert.ok(lines.includes("• Masa Görevlisi: M1"));
+        assert.ok(!lines.some(l => l.includes("Baş Hakem") || l.includes("Sayı Görevlisi")));
+    });
 });

@@ -1,5 +1,5 @@
 import { MatchData } from "./match-parser";
-import { ROLE_GROUPS, formatDayTR, formatTime, namesOf, seatLabel } from "./notification-text";
+import { ROLE_GROUPS, formatDayTR, formatTime, isGroupFull, namesOf, seatLabel } from "./notification-text";
 
 // İki maç hâli (eski / yeni) arasındaki farkı "Maçınız Güncellendi" bildiriminin
 // satırlarına çevirir (2026-10-31, kullanıcı kararı):
@@ -43,16 +43,18 @@ export function diffMatch(oldMatch: MatchData | null, newMatch: MatchData | null
         // Çıkan ile gireni sırayla eşle: "A yerine B". Eşi olmayan ekleme/çıkarma bildirilmez.
         const pairs = Math.min(removed.length, addedIdx.length);
         for (let k = 0; k < pairs; k++) {
-            lines.push(`🔁 ${seatLabel(group, addedIdx[k].i)}: ${removed[k]} yerine ${addedIdx[k].n} geldi`);
+            lines.push(`🔁 ${seatLabel(group, addedIdx[k].i, newNames.length)}: ${removed[k]} yerine ${addedIdx[k].n} geldi`);
         }
 
         // Hakemlerde koltuk değişimi (ör. Yardımcı Hakem Baş Hakem oldu) — sadece iki
         // listede de bulunan isimler için; yeni gelen biri zaten yukarıda yazıldı.
-        if (group.key === "hakemler") {
+        // Eski VE yeni liste tam doluyken bakılır: eksik listede sıra boş hücre yüzünden
+        // kaymış olabilir (ilk dolumda Baş Hakem sonradan yazılınca sahte "artık" satırı çıkardı).
+        if (group.key === "hakemler" && isGroupFull(group, oldNames.length) && isGroupFull(group, newNames.length)) {
             newNames.forEach((name, i) => {
                 const oldIndex = oldNames.findIndex(o => norm(o) === norm(name));
                 if (oldIndex >= 0 && oldIndex !== i && group.seats[i]) {
-                    lines.push(`🔁 ${seatLabel(group, i)} artık ${name}`);
+                    lines.push(`🔁 ${seatLabel(group, i, newNames.length)} artık ${name}`);
                 }
             });
         }

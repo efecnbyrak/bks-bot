@@ -72,4 +72,19 @@ describe("diffMatch", () => {
         const newM = md({ hakemler: ["Ali Veli", "-"] });
         assert.deepEqual(diffMatch(oldM, newM), []);
     });
+    test("eksik grupta koltuk adı verilmez (boş hücre kayması): 'Hakem: A yerine B'", () => {
+        // Baş Hakem hücresi boş, sadece Yardımcı dolu → liste tek isim, sıra güvenilmez
+        const oldM = md({ hakemler: ["ALİ"], masa_gorevlileri: ["M1", "M2"] });
+        const newM = md({ hakemler: ["CAN"], masa_gorevlileri: ["M1", "YENİ"] });
+        assert.deepEqual(diffMatch(oldM, newM), [
+            "🔁 Hakem: ALİ yerine CAN geldi",
+            "🔁 Masa Görevlisi: M2 yerine YENİ geldi",
+        ]);
+    });
+
+    test("ilk dolum: Yardımcı önce yazılmış, Baş Hakem sonradan geldi → bildirim YOK", () => {
+        const oldM = md({ hakemler: ["CAN"] });
+        const newM = md({ hakemler: ["ALİ", "CAN"] });
+        assert.deepEqual(diffMatch(oldM, newM), []);
+    });
 });

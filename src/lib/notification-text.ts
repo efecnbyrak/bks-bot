@@ -45,8 +45,17 @@ export const ROLE_GROUPS: { key: keyof MatchData; seats: string[]; fallback: str
     { key: "sahaKomiserleri", seats: [], fallback: "Saha Komiseri" },
 ];
 
-export function seatLabel(group: (typeof ROLE_GROUPS)[number], index: number): string {
-    return group.seats[index] ?? group.fallback;
+// Koltuk adı SADECE grup tam doluyken verilir. Excel okunurken boş hücreler atıldığı için
+// (match-parser.ts → `.filter(v => v.length > 2)`) Baş Hakem hücresi boş, Yardımcı dolu
+// olduğunda Yardımcı listenin başına kayıyor — o durumda "Baş Hakem" yazmak yanlış olur,
+// genel ad ("Hakem") yazılır. Ayrıştırıcıya dokunulmadı: boşlukları korumak matchKey'i
+// (hakem/masa listesi hash'leniyor) topluca değiştirirdi.
+export function isGroupFull(group: (typeof ROLE_GROUPS)[number], total: number): boolean {
+    return group.seats.length > 0 && total >= group.seats.length;
+}
+
+export function seatLabel(group: (typeof ROLE_GROUPS)[number], index: number, total: number): string {
+    return isGroupFull(group, total) ? (group.seats[index] ?? group.fallback) : group.fallback;
 }
 
 // Gruptaki gerçek isimler (yer tutucular ayıklanmış), Excel'deki sırasıyla.
@@ -77,7 +86,8 @@ export function matchDetailLines(m: MatchData, withStaff = true): string[] {
     if (withStaff) {
         const staff: string[] = [];
         for (const group of ROLE_GROUPS) {
-            namesOf(m, group.key).forEach((name, i) => staff.push(`• ${seatLabel(group, i)}: ${name}`));
+            const names = namesOf(m, group.key);
+            names.forEach((name, i) => staff.push(`• ${seatLabel(group, i, names.length)}: ${name}`));
         }
         if (staff.length > 0) lines.push("", "👥 Görevliler", ...staff);
     }
