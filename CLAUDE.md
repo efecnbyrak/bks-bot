@@ -307,6 +307,12 @@ ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır sili
    `push-sender.ts` → `sendMatchPush` atar. `messaging/invalid-argument` artık ölü token
    SAYILMAZ (payload hatasında sağlam token'lar siliniyordu; web ikizi de değişti).
    `match_notification_outbox`'a SADECE bu repo yazar; şema web reposunda.
+   **Büyütülebilir bildirim (2026-10-31):** Firebase'in Android'de kendi çizdiği klasik
+   bildirim uzun metni büyütmüyor. `push-sender.ts` → `supportsDataOnly(platform, appVersion)`
+   1.0.12+ Android token'lara `notification` bloğu OLMAYAN mesaj gönderir (`data.title` /
+   `data.body` / `data.channel`, `android.priority: high`); mobil `showDataOnlyNotification`
+   bunu BigText ile çizer. Eski sürüm / iOS / sürümsüz token → klasik biçim (eski sürüm veri
+   mesajını gösteremez). Sürüm `PushToken.appVersion` (web `register-token` yazar).
 4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
    yana açılıp model/alan/index listesi karşılaştırılmalı.
 5. **`Announcement.source` senkronu (2026-09-28):** web'in `schema.prisma`'sındaki

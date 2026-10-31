@@ -289,6 +289,10 @@ model PushToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   token     String   @unique
   platform  String
+  // Uygulama sürümü ("1.0.12"), token kaydında mobilden gelir; eski sürümlerde boş.
+  // BKS-BOT maç bildirimlerini 1.0.12+ Android'e sadece veri taşıyan (uygulamanın kendisi
+  // büyütülebilir gösterdiği) biçimde, diğerlerine klasik biçimde gönderir (2026-10-31).
+  appVersion String?
   createdAt DateTime @default(now())
 
   @@index([userId])

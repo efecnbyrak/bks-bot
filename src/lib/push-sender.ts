@@ -41,6 +41,24 @@ function getFirebaseApp(): App | null {
     }
 }
 
+// Büyütülebilir bildirimi uygulamanın KENDİSİ çizebilen ilk mobil sürüm (2026-10-31).
+// Firebase'in Android'de kendi çizdiği klasik bildirim uzun metni büyütmüyor (tek satır
+// kalıyor); 1.0.12+ Android'e `notification` bloğu OLMAYAN, sadece veri taşıyan mesaj
+// gönderilir ve uygulama onu Telegram gibi büyütülebilir gösterir
+// (bks-mobile-flutter push_notification_service.dart → showDataOnlyNotification).
+// Eski sürümler bu mesajı GÖSTEREMEZ — o yüzden onlara klasik biçim gider.
+export const DATA_ONLY_MIN_VERSION = [1, 0, 12];
+
+export function supportsDataOnly(platform: string | null | undefined, appVersion: string | null | undefined): boolean {
+    if (platform !== "android" || !appVersion) return false;
+    const parts = appVersion.split(".").map(n => Number(n));
+    if (parts.length !== 3 || parts.some(n => !Number.isInteger(n))) return false;
+    for (let i = 0; i < 3; i++) {
+        if (parts[i] !== DATA_ONLY_MIN_VERSION[i]) return parts[i] > DATA_ONLY_MIN_VERSION[i];
+    }
+    return true;
+}
+
 async function sendPushToUsers(
     userIds: number[],
     title: string,
@@ -56,69 +74,79 @@ async function sendPushToUsers(
 
     const tokenRows = await db.pushToken.findMany({
         where: { userId: { in: userIds } },
-        select: { token: true },
+        select: { token: true, platform: true, appVersion: true },
     });
 
-    const tokens = tokenRows
-        .map((r: { token: string }) => r.token)
-        .filter((t: string) => typeof t === "string" && t.length > 0);
-
-    if (tokens.length === 0) {
+    type TokenRow = { token: string; platform: string; appVersion: string | null };
+    const valid = tokenRows.filter((r: TokenRow) => typeof r.token === "string" && r.token.length > 0);
+    if (valid.length === 0) {
         logger.info(`${logLabel}: push token bulunamadı`, { userIds });
         return;
     }
 
-    for (let i = 0; i < tokens.length; i += CHUNK_SIZE) {
-        const chunk = tokens.slice(i, i + CHUNK_SIZE);
+    // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
+    // yönlendirme yapabilsin diye tüm maç bildirimlerine eklenen ortak alan.
+    const data = { type: dataType, screen: "MATCHES", ...extraData };
 
-        try {
-            const response = await getMessaging(app).sendEachForMulticast({
-                tokens: chunk,
-                notification: { title, body },
-                // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
-                // yönlendirme yapabilsin diye üç bildirim tipine de eklenen ortak alan.
-                data: { type: dataType, screen: "MATCHES", ...extraData },
-                // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
-                // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
-                android: {
-                    priority: "high",
-                    notification: {
-                        sound: "default",
-                        channelId: "matches",
-                    },
-                },
-                apns: {
-                    headers: { "apns-priority": "10", "apns-push-type": "alert" },
-                    payload: {
-                        aps: { sound: "default" },
-                    },
-                },
-            });
+    // Klasik biçim (eski sürümler, iOS): bildirimi sistem gösterir.
+    // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
+    // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
+    const classic = {
+        notification: { title, body },
+        data,
+        android: {
+            priority: "high" as const,
+            notification: { sound: "default", channelId: "matches" },
+        },
+        apns: {
+            headers: { "apns-priority": "10", "apns-push-type": "alert" },
+            payload: { aps: { sound: "default" } },
+        },
+    };
+    // Sadece veri (1.0.12+ Android): başlık/metin/kanal data içinde, uygulama çizer.
+    // "high" öncelik şart — yoksa uygulama kapalıyken mesaj Doze'da bekletilir.
+    const dataOnly = {
+        data: { ...data, title, body, channel: "matches" },
+        android: { priority: "high" as const },
+    };
 
-            if (response.failureCount > 0) {
-                const deadTokens: string[] = [];
-                response.responses.forEach((r, idx) => {
-                    if (r.success) return;
-                    if (r.error?.code && DEAD_TOKEN_ERROR_CODES.has(r.error.code)) {
-                        deadTokens.push(chunk[idx]);
+    const groups = [
+        { message: dataOnly, tokens: valid.filter((r: TokenRow) => supportsDataOnly(r.platform, r.appVersion)).map((r: TokenRow) => r.token) },
+        { message: classic, tokens: valid.filter((r: TokenRow) => !supportsDataOnly(r.platform, r.appVersion)).map((r: TokenRow) => r.token) },
+    ];
+
+    for (const group of groups) {
+        for (let i = 0; i < group.tokens.length; i += CHUNK_SIZE) {
+            const chunk = group.tokens.slice(i, i + CHUNK_SIZE);
+            try {
+                const response = await getMessaging(app).sendEachForMulticast({ tokens: chunk, ...group.message });
+
+                if (response.failureCount > 0) {
+                    const deadTokens: string[] = [];
+                    response.responses.forEach((r, idx) => {
+                        if (r.success) return;
+                        if (r.error?.code && DEAD_TOKEN_ERROR_CODES.has(r.error.code)) {
+                            deadTokens.push(chunk[idx]);
+                        }
+                    });
+                    logger.error("FCM gönderim hataları", { failureCount: response.failureCount });
+
+                    if (deadTokens.length > 0) {
+                        await db.pushToken
+                            .deleteMany({ where: { token: { in: deadTokens } } })
+                            .catch((err: Error) => logger.error("Ölü token temizliği başarısız", { error: err.message }));
                     }
-                });
-                logger.error("FCM gönderim hataları", { failureCount: response.failureCount });
-
-                if (deadTokens.length > 0) {
-                    await db.pushToken
-                        .deleteMany({ where: { token: { in: deadTokens } } })
-                        .catch((err: Error) => logger.error("Ölü token temizliği başarısız", { error: err.message }));
                 }
+            } catch (err: any) {
+                logger.error("Push gönderme hatası", { error: err?.message });
             }
-        } catch (err: any) {
-            logger.error("Push gönderme hatası", { error: err?.message });
         }
     }
 
     logger.info(`${logLabel} gönderildi`, {
         userCount: userIds.length,
-        tokenCount: tokens.length,
+        tokenCount: valid.length,
+        buyutulebilir: groups[0].tokens.length,
     });
 }
 
