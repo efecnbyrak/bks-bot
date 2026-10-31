@@ -67,33 +67,35 @@ describe("decideAssignmentOutcomes — oynanmış maça iptal yok", () => {
 
 describe("planNotifications — sadece gelecek maçlar", () => {
     const now = trt("2026-10-26T10:00:00");
-    const cancel = (tarih: string, saat: string) => ({ matchId: 1, matchKey: "", macAdi: "ESKİ", tarih, saat, affectedUserIds: [9], contentKey: "old" });
-    const assign = (tarih: string, saat: string) => ({ userId: 9, matchId: 2, macAdi: "YENİ", tarih, saat, contentKey: "new", matchData: md() });
+    const cancel = (tarih: string, saat: string) => ({ matchId: 1, matchKey: "", macAdi: "ESKİ", tarih, saat, affectedUserIds: [9], contentKey: "old", matchData: md({ mac_adi: "ESKİ", tarih, saat }) });
+    const assign = (tarih: string, saat: string) => ({ userId: 9, matchId: 2, macAdi: "YENİ", tarih, saat, contentKey: "new", matchData: md({ mac_adi: "YENİ", tarih, saat }) });
+    const kinds = (r: { kind: string }[]) => r.map(n => n.kind).sort();
 
     test("geçmiş iptal / güncelleme / yeni atama → hiç bildirim yok", () => {
         const r = planNotifications({ cancellations: [cancel("25.10.2026", "18:00")], newAssignments: [],
             shifted: [{ userId: 5, macAdi: "X", tarih: "26.10.2026", saat: "09:00", contentKey: "c", oldMatchData: null, newMatchData: null }] }, now);
-        assert.equal(r.notifications.length, 0);
-        assert.equal(r.realCancellationGroups.length, 0);
+        assert.equal(r.length, 0);
         const r2 = planNotifications({ cancellations: [], newAssignments: [assign("25.10.2026", "18:00")], shifted: [] }, now);
-        assert.equal(r2.notifications.length, 0);
+        assert.equal(r2.length, 0);
     });
     test("bugün henüz başlamamış maç iptali → bildirim gider", () => {
         const r = planNotifications({ cancellations: [cancel("26.10.2026", "19:00")], newAssignments: [], shifted: [] }, now);
-        assert.deepEqual(r.realCancellationGroups[0].userIds, [9]);
+        assert.deepEqual(r.map(n => [n.kind, n.userId]), [["CANCELLED", 9]]);
     });
-    test("eski maç geçmiş + yeni maç gelecek → 'Yeni Maça Atandınız' (Değişti değil)", () => {
+    test("eski maç geçmiş + yeni maç gelecek → düz Atama (Değişiklik değil)", () => {
         const r = planNotifications({ cancellations: [cancel("25.10.2026", "18:00")], newAssignments: [assign("30.10.2026", "18:00")], shifted: [] }, now);
-        assert.equal(r.notifications[0].kind, "ASSIGNED");
-        assert.equal(r.realCancellationGroups.length, 0);
+        assert.deepEqual(kinds(r), ["ASSIGNED"]);
     });
     test("eski maç gelecek + yeni maç geçmiş → düz iptal", () => {
         const r = planNotifications({ cancellations: [cancel("30.10.2026", "18:00")], newAssignments: [assign("25.10.2026", "18:00")], shifted: [] }, now);
-        assert.equal(r.notifications.length, 0);
-        assert.deepEqual(r.realCancellationGroups[0].userIds, [9]);
+        assert.deepEqual(kinds(r), ["CANCELLED"]);
     });
-    test("ikisi de gelecek → 'Maçınız Değişti'", () => {
+    test("ikisi de gelecek, AYNI gün → Değişiklik", () => {
+        const r = planNotifications({ cancellations: [cancel("30.10.2026", "14:00")], newAssignments: [assign("30.10.2026", "18:00")], shifted: [] }, now);
+        assert.deepEqual(kinds(r), ["CHANGED"]);
+    });
+    test("ikisi de gelecek, FARKLI gün → ayrı İptal + Atama (kullanıcı kararı 2026-10-31)", () => {
         const r = planNotifications({ cancellations: [cancel("29.10.2026", "18:00")], newAssignments: [assign("30.10.2026", "18:00")], shifted: [] }, now);
-        assert.equal(r.notifications[0].kind, "CHANGED");
+        assert.deepEqual(kinds(r), ["ASSIGNED", "CANCELLED"]);
     });
 });

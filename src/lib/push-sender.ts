@@ -11,10 +11,12 @@ import { logger } from "../logger";
 
 // FCM'in "bu token bir daha asla çalışmayacak" dediği hata kodları — bunlarla dönen
 // token'lar tabloda tutulmaya devam ederse zamanla push_tokens şişer, boşa istek gider.
+// "messaging/invalid-argument" BİLİNÇLİ OLARAK listede YOK (2026-10-31): FCM bu kodu
+// mesajın kendisi hatalıyken de (ör. payload fazla büyük) döndürüyor — o durumda o
+// gönderimdeki SAĞLAM token'lar da silinip kullanıcı sessizce bildirimsiz kalıyordu.
 const DEAD_TOKEN_ERROR_CODES = new Set([
     "messaging/registration-token-not-registered",
     "messaging/invalid-registration-token",
-    "messaging/invalid-argument",
 ]);
 
 const CHUNK_SIZE = 500; // FCM sendEachForMulticast tek istekte en fazla 500 token kabul ediyor
@@ -120,58 +122,24 @@ async function sendPushToUsers(
     });
 }
 
-export async function sendCancellationPush(
+// Maç bildirimi türü → mobilin okuduğu `type` alanı. screen/channel dört türde de aynı
+// ("MATCHES" / "matches"), mobilde ek bir yönlendirme kuralı gerekmez.
+const MATCH_PUSH_TYPES = {
+    ASSIGNED: { dataType: "MATCH_ASSIGNED", logLabel: "Atama bildirimi" },
+    CHANGED: { dataType: "MATCH_CHANGED", logLabel: "Değişiklik bildirimi" },
+    CANCELLED: { dataType: "MATCH_CANCELLED", logLabel: "İptal bildirimi" },
+    UPDATED: { dataType: "MATCH_UPDATED", logLabel: "Güncelleme bildirimi" },
+} as const;
+
+export type MatchPushKind = keyof typeof MATCH_PUSH_TYPES;
+
+// Başlık ve metin src/lib/notification-text.ts'te üretilir; burası sadece gönderir.
+export async function sendMatchPush(
     userIds: number[],
-    matchName: string,
-    matchDate: string
+    kind: MatchPushKind,
+    text: { title: string; body: string },
+    extraData?: Record<string, string>
 ): Promise<void> {
-    const body = `${matchName} (${matchDate}) maçınız iptal edildi.`;
-    await sendPushToUsers(userIds, "Maç İptal Edildi", body, "MATCH_CANCELLED", "İptal bildirimi");
-}
-
-export async function sendAssignmentPush(
-    userId: number,
-    matchName: string,
-    matchDate: string
-): Promise<void> {
-    const body = `${matchName} (${matchDate}) maçına atandınız.`;
-    await sendPushToUsers([userId], "Yeni Maça Atandınız", body, "MATCH_ASSIGNED", "Atama bildirimi");
-}
-
-export async function sendMatchChangedPush(
-    userId: number,
-    oldMatchName: string,
-    oldMatchDate: string,
-    newMatchName: string,
-    newMatchDate: string
-): Promise<void> {
-    const body = `${oldMatchName} (${oldMatchDate}) yerine ${newMatchName} (${newMatchDate}) maçına atandınız.`;
-    await sendPushToUsers(
-        [userId],
-        "Maçınız Değişti",
-        body,
-        "MATCH_CHANGED",
-        "Değişiklik bildirimi",
-        { oldMatchName, newMatchName }
-    );
-}
-
-// FAZ 3 — Kullanıcı maçta KALDI ama kadro/görevli listesi değişti (federasyon kademeli
-// doldurdu ya da bir görevliyi değiştirdi). "Yeni maça atandınız" YANLIŞ olurdu — bunun
-// yerine kısa bir "güncellendi" bildirimi. screen/channel diğer maç bildirimleriyle aynı,
-// mobil tarafta ek bir yönlendirme kuralı gerekmez.
-export async function sendMatchUpdatedPush(
-    userId: number,
-    matchName: string,
-    matchDate: string,
-    changeSummary: string
-): Promise<void> {
-    const body = `${matchName} (${matchDate}) — ${changeSummary}`;
-    await sendPushToUsers(
-        [userId],
-        "Maçınız Güncellendi",
-        body,
-        "MATCH_UPDATED",
-        "Güncelleme bildirimi"
-    );
+    const { dataType, logLabel } = MATCH_PUSH_TYPES[kind];
+    await sendPushToUsers(userIds, text.title, text.body, dataType, logLabel, extraData);
 }

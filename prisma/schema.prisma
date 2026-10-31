@@ -70,6 +70,7 @@ model User {
   announcementReads         AnnouncementRead[]
   userMatchAssignments      UserMatchAssignment[]
   pushTokens                PushToken[]
+  matchNotificationOutbox   MatchNotificationOutbox[]
   availabilityNotifications AvailabilityNotification[]
 
   @@index([username])
@@ -292,6 +293,30 @@ model PushToken {
 
   @@index([userId])
   @@map("push_tokens")
+}
+
+// BKS-BOT'un maç bildirimi teyit kuyruğu (2026-10-31). İptal / Güncellendi / Değişiklik
+// bildirimleri hemen gönderilmez, burada `dueAt`'e kadar (varsayılan 10 dk) bekler;
+// süre dolunca bot durumu DB'den yeniden kontrol eder, hâlâ geçerliyse gönderir
+// (SENT), değilse düşürür (DROPPED). Federasyon E-Tabloyu canlı düzenlerken yarım
+// hâlin "sahte iptal" bildirimi üretmesini engeller. SADECE BKS-BOT yazar/okur, web dokunmaz.
+model MatchNotificationOutbox {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind          String // "CANCELLED" | "UPDATED" | "CHANGED"
+  contentKey    String?
+  oldContentKey String?
+  payload       Json // bot change-notifier.ts → PlannedNotification
+  dueAt         DateTime
+  status        String    @default("PENDING") // "PENDING" | "SENT" | "DROPPED"
+  dropReason    String?
+  createdAt     DateTime  @default(now())
+  sentAt        DateTime?
+
+  @@index([status, dueAt])
+  @@index([userId, contentKey])
+  @@map("match_notification_outbox")
 }
 
 // ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────

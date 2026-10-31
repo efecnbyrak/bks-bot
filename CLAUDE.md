@@ -283,6 +283,26 @@ ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır sili
    silinmez), `planNotifications` → `filterFutureEvents` olayları plana girmeden süzer.
    Eskiden kontrol UTC GÜN bazlıydı — aynı gün oynanmış veya TRT gece yarısından sonra
    arşive taşınan maç "İptal" push'u alıyordu.
+   **Teyit kuyruğu + yeni metinler (2026-10-31, kullanıcı kararı):** "Atama" anında gider;
+   İptal / Güncellendi / Değişiklik `match_notification_outbox`'a yazılıp
+   `NOTIFY_CONFIRM_DELAY_MIN` (varsayılan 10) dk bekler, `src/notification-outbox.ts` →
+   `flushDueNotifications` (her turun sonunda, `index.ts`) durumu DB'den yeniden kontrol edip
+   gönderir ya da düşürür (`resolvePending`, saf + testli). Sebep: federasyon E-Tabloyu canlı
+   düzenlerken yarım hâl sahte iptal üretiyordu (26 Ekim'den sonraki 39 iptalin 17'si; 29 Ekim
+   20:09'da 15 kişiye iptal, 20:17'de aynı kişilere "Yeni Maça Atandınız"). "Maç İadesi"
+   duyurusu da teyitten SONRA yazılır. Bekleyen iptal, aynı kişinin bu turdaki yeni atamasıyla
+   `planWithPending` içinde eşleşir (aynı maç → sessiz düşer; aynı gün başka maç → Değişiklik).
+   Kural seti (`src/change-notifier.ts`, saf): kişi başına HER maç ayrı bildirim (eskiden sadece
+   ilk olay); aynı takımlar + lig türü yeni tarih/saatle → Güncellendi; aynı GÜN başka maç →
+   Değişiklik; farklı gün → ayrı İptal + Atama. Güncellendi satırları `src/lib/squad-change.ts`
+   → `diffMatch`: sadece "A yerine B" (aynı rol grubunda çıkan+giren), hakem koltuk değişimi,
+   tarih/saat/salon değişimi; boş yere ekleme (ilk dolum) ve yerine kimse yazılmadan çıkarma
+   bildirim ÜRETMEZ; maçta kalan herkese gider. Başlık/metin `src/lib/notification-text.ts`
+   (başlıkta takım adı yok, gövdede maçın tüm bilgisi + görevliler alt alta; masa koltuk
+   adları web `lib/matches/official-roles.ts` → `seatLabels` ile SYNC). Push'u
+   `push-sender.ts` → `sendMatchPush` atar. `messaging/invalid-argument` artık ölü token
+   SAYILMAZ (payload hatasında sağlam token'lar siliniyordu; web ikizi de değişti).
+   `match_notification_outbox`'a SADECE bu repo yazar; şema web reposunda.
 4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
    yana açılıp model/alan/index listesi karşılaştırılmalı.
 5. **`Announcement.source` senkronu (2026-09-28):** web'in `schema.prisma`'sındaki
@@ -334,8 +354,9 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   tek başına yeterli değildir (Excel'de isim sırası tutarsız).
 - "Yeni atama mı" kararı `userId:matchId` değil **`userId:contentKey`** bazlıdır.
 - `detectAndMarkCancelledMatches` → `CancellationScanResult { cancelled, shifted }` döner.
-  `reconcileAndNotify` bunları + `newAssignments`'i alıp `planNotifications` (saf fonksiyon)
-  ile kullanıcı bazında tek bir bildirim tipi seçer: `UPDATED` / `CHANGED` / `CANCELLED` / `ASSIGNED`.
+  `reconcileAndNotify` (`src/notification-outbox.ts`) bunları + `newAssignments`'i alıp
+  `planWithPending` (saf, `src/change-notifier.ts`) ile kullanıcı + maç bazında bildirim tipi
+  seçer: `UPDATED` / `CHANGED` / `CANCELLED` / `ASSIGNED` (ayrıntı: yukarıdaki "Teyit kuyruğu" notu).
 - **BUG DÜZELTİLDİ (2026-09-24, destek talebi):** `CANCELLED` kararı verilen
   `UserMatchAssignment` satırı, karar doğru hesaplandığı hâlde hiç SİLİNMİYORDU
   (sadece bildirim için `cancelledMap`'e ekleniyordu) — bu yüzden eski `ParsedMatch`

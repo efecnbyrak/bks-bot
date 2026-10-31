@@ -315,6 +315,35 @@ export async function releaseLock(folderKey: string, success: boolean): Promise<
     });
 }
 
+// ParsedMatch satırından MatchData kurmak için gereken alanlar ve dönüştürücü —
+// iptal taraması ve bildirim teyit kuyruğu (notification-outbox.ts) ortak kullanır.
+export const MATCH_DATA_SELECT = {
+    id: true, contentKey: true,
+    macAdi: true, tarih: true, saat: true, salon: true, kategori: true, altKategori: true,
+    hafta: true, sezon: true, ligTuru: true, kaynakDosya: true,
+    hakemler: true, masaGorevlileri: true, saglikcilar: true,
+    istatistikciler: true, gozlemciler: true, sahaKomiserleri: true,
+} as const;
+
+export interface MatchDataRow {
+    macAdi: string; tarih: string; saat: string | null; salon: string | null;
+    kategori: string; altKategori: string | null; hafta: number | null; sezon: string | null;
+    ligTuru: string; kaynakDosya: string;
+    hakemler: string[]; masaGorevlileri: string[]; saglikcilar: string[];
+    istatistikciler: string[]; gozlemciler: string[]; sahaKomiserleri: string[];
+}
+
+export function parsedRowToMatchData(r: MatchDataRow): MatchData {
+    return {
+        mac_adi: r.macAdi, tarih: r.tarih, saat: r.saat ?? undefined, salon: r.salon ?? undefined,
+        kategori: r.kategori, altKategori: r.altKategori ?? undefined, hafta: r.hafta ?? undefined,
+        sezon: r.sezon ?? undefined, ligTuru: r.ligTuru,
+        hakemler: r.hakemler, masa_gorevlileri: r.masaGorevlileri, saglikcilar: r.saglikcilar,
+        istatistikciler: r.istatistikciler, gozlemciler: r.gozlemciler, sahaKomiserleri: r.sahaKomiserleri,
+        kaynak_dosya: r.kaynakDosya,
+    };
+}
+
 export interface CancelledMatchInfo {
     matchId: number;
     matchKey: string;
@@ -325,6 +354,9 @@ export interface CancelledMatchInfo {
     // FAZ 2 — reconcileAndNotify'ın "aynı maça mı yeniden atandı (güncelleme),
     // yoksa başka maça mı taşındı (değişiklik)" ayrımını yapabilmesi için.
     contentKey: string | null;
+    // İptal edilen satırın tam hâli — bildirim metnine kategori/salon yazmak ve
+    // "aynı maçın tarihi mi değişti" kararını (takım + lig türü) vermek için.
+    matchData?: MatchData | null;
 }
 
 // FAZ 2 — Kadrosu değiştiği için başka bir aktif satıra taşınan atama.
@@ -629,24 +661,11 @@ export async function detectAndMarkCancelledMatches(
     const activeRowsRaw = touchedContentKeys.length > 0
         ? await db.parsedMatch.findMany({
               where: { contentKey: { in: touchedContentKeys }, cancelledAt: null },
-              select: {
-                  id: true, matchKey: true, contentKey: true, driveFileId: true,
-                  macAdi: true, tarih: true, saat: true, salon: true, kategori: true,
-                  hafta: true, sezon: true, ligTuru: true, kaynakDosya: true,
-                  hakemler: true, masaGorevlileri: true, saglikcilar: true,
-                  istatistikciler: true, gozlemciler: true, sahaKomiserleri: true,
-              },
+              select: { matchKey: true, driveFileId: true, ...MATCH_DATA_SELECT },
           })
         : [];
 
-    // ParsedMatch satırını MatchData şekline çevir (personIsInMatch bunu bekliyor)
-    const rowToMatchData = (r: typeof activeRowsRaw[number]): MatchData => ({
-        mac_adi: r.macAdi, tarih: r.tarih, saat: r.saat ?? undefined, salon: r.salon ?? undefined,
-        kategori: r.kategori, hafta: r.hafta ?? undefined, sezon: r.sezon ?? undefined, ligTuru: r.ligTuru,
-        hakemler: r.hakemler, masa_gorevlileri: r.masaGorevlileri, saglikcilar: r.saglikcilar,
-        istatistikciler: r.istatistikciler, gozlemciler: r.gozlemciler, sahaKomiserleri: r.sahaKomiserleri,
-        kaynak_dosya: r.kaynakDosya,
-    });
+    const rowToMatchData = parsedRowToMatchData;
 
     // contentKey → o maça ait tüm aktif satırlar { id, data }
     const activeRowsByContentKey = new Map<string, { id: number; matchKey?: string; data: MatchData }[]>();
@@ -708,6 +727,7 @@ export async function detectAndMarkCancelledMatches(
             cancelledMap.set(d.fromMatchId, {
                 matchId: meta.id, matchKey: meta.matchKey, macAdi: meta.macAdi,
                 tarih: meta.tarih, saat: meta.saat, affectedUserIds: [], contentKey: meta.contentKey,
+                matchData: activeRowDataById.get(meta.id) ?? null,
             });
         }
         cancelledMap.get(d.fromMatchId)!.affectedUserIds.push(d.userId);

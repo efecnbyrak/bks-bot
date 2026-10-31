@@ -1,7 +1,7 @@
 import { resolveSyncFolderKeys } from "./config";
 import { runSync, RunSyncResult } from "./orchestrator";
 import { runTbfMilliSync } from "./tbf-milli-sync";
-import { reconcileAndNotify } from "./change-notifier";
+import { reconcileAndNotify, flushDueNotifications } from "./notification-outbox";
 import { isFirstEverSync, CancelledMatchInfo, ShiftedAssignmentInfo } from "./db-writer";
 import { consolidateActiveContentKeyDuplicates } from "./lib/contentkey-consolidator";
 import { NewAssignmentInfo } from "./user-matcher";
@@ -50,6 +50,17 @@ async function main() {
         // Tüm klasörler işlendikten SONRA tek bir uzlaştırma adımı: kullanıcı bazında
         // "güncellendi / değişti / iptal / yeni atama" ayrımı yapılıp doğru bildirim gönderilir.
         await reconcileAndNotify(allNewAssignments, allCancellations, isInitial, allShifted);
+
+        // Teyit kuyruğu: süresi dolan İptal / Güncellendi / Değişiklik bildirimleri DB'nin
+        // güncel hâliyle kontrol edilip gönderilir. Dosya değişmese bile her turda çalışır.
+        if (!isInitial) {
+            try {
+                await flushDueNotifications();
+            } catch (flushErr: any) {
+                // Kuyruk hatası sync'i başarısız saymaz — kayıtlar PENDING kalır, sonraki turda denenir.
+                logger.error("Bildirim teyit kuyruğu hatası", { error: flushErr?.message });
+            }
+        }
 
         // B6: Donmuş dosyalarda birikmiş aktif-aktif contentKey ikizlerini birleştir.
         // detectAndMarkCancelledMatches (db-writer.ts) yalnızca DEĞİŞEN dosyalarda çalışıyor

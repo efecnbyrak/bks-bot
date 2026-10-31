@@ -1,60 +1,62 @@
 import { MatchData } from "./match-parser";
+import { ROLE_GROUPS, formatDayTR, formatTime, namesOf, seatLabel } from "./notification-text";
 
-// FAZ 3 — İki ParsedMatch satırı (eski kadro / yeni kadro) arasındaki farkı,
-// kullanıcıya gösterilecek ÇOK KISA bir Türkçe cümleye çevirir.
-// Saat/salon farkı bilinçli olarak ele alınmıyor (o metin sonraki tura bırakıldı) —
-// sadece görevli kadrosundaki değişiklik özetlenir.
-
-const ROLE_LABELS: { key: keyof MatchData; label: string }[] = [
-    { key: "hakemler", label: "hakem" },
-    { key: "masa_gorevlileri", label: "masa görevlisi" },
-    { key: "saglikcilar", label: "sağlık görevlisi" },
-    { key: "istatistikciler", label: "istatistikçi" },
-    { key: "gozlemciler", label: "gözlemci" },
-    { key: "sahaKomiserleri", label: "saha komiseri" },
-];
+// İki maç hâli (eski / yeni) arasındaki farkı "Maçınız Güncellendi" bildiriminin
+// satırlarına çevirir (2026-10-31, kullanıcı kararı):
+//  - Aynı rol grubunda biri çıkıp biri girdiyse   → "🔁 Baş Hakem: A yerine B geldi"
+//  - Sadece ekleme (boş yere birinin yazılması)    → satır YOK (ilk dolum, değişiklik sayılmaz)
+//  - Sadece çıkarma (yerine kimse yazılmadı)       → satır YOK (çıkarılan kişiye zaten İptal gider)
+//  - Hakemler arasında yer değişimi                → "🔁 Baş Hakem artık B"
+//  - Tarih / saat / salon değişimi                 → "📅 Tarih: X → Y" vb. (boş alanın dolması hariç)
+// Boş dizi = bildirilecek bir değişiklik yok, "Güncellendi" bildirimi GİTMEZ.
 
 function norm(s: string): string {
-    return s.trim().toLowerCase();
+    return (s ?? "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr");
 }
 
-export function summarizeSquadChange(oldMatch: MatchData | null, newMatch: MatchData | null): string {
-    if (!oldMatch || !newMatch) return "Görevli kadrosu güncellendi";
+export function diffMatch(oldMatch: MatchData | null, newMatch: MatchData | null): string[] {
+    if (!oldMatch || !newMatch) return [];
+    const lines: string[] = [];
 
-    let added = 0;
-    let removed = 0;
-    const changedRoles: string[] = [];
+    // Tarih / saat / salon — eski değer boşsa (federasyon sonradan doldurdu) değişiklik sayılmaz.
+    if (oldMatch.tarih?.trim() && norm(oldMatch.tarih) !== norm(newMatch.tarih)) {
+        lines.push(`📅 Tarih: ${formatDayTR(oldMatch.tarih)} → ${formatDayTR(newMatch.tarih)}`);
+    }
+    const oldTime = formatTime(oldMatch.saat);
+    const newTime = formatTime(newMatch.saat);
+    if (oldTime && newTime && oldTime !== newTime) {
+        lines.push(`⏰ Saat: ${oldTime} → ${newTime}`);
+    }
+    if (oldMatch.salon?.trim() && newMatch.salon?.trim() && norm(oldMatch.salon) !== norm(newMatch.salon)) {
+        lines.push(`🏟️ Salon: ${oldMatch.salon.trim()} → ${newMatch.salon.trim()}`);
+    }
 
-    for (const { key, label } of ROLE_LABELS) {
-        const oldList = (oldMatch[key] as string[]).map(norm);
-        const newList = (newMatch[key] as string[]).map(norm);
-        const oldSet = new Set(oldList);
-        const newSet = new Set(newList);
+    for (const group of ROLE_GROUPS) {
+        const oldNames = namesOf(oldMatch, group.key);
+        const newNames = namesOf(newMatch, group.key);
+        const oldSet = new Set(oldNames.map(norm));
+        const newSet = new Set(newNames.map(norm));
 
-        const roleAdded = newList.filter(n => !oldSet.has(n)).length;
-        const roleRemoved = oldList.filter(n => !newSet.has(n)).length;
+        const removed = oldNames.filter(n => !newSet.has(norm(n)));
+        const addedIdx = newNames.map((n, i) => ({ n, i })).filter(x => !oldSet.has(norm(x.n)));
 
-        if (roleAdded > 0 || roleRemoved > 0) {
-            changedRoles.push(label);
-            added += roleAdded;
-            removed += roleRemoved;
+        // Çıkan ile gireni sırayla eşle: "A yerine B". Eşi olmayan ekleme/çıkarma bildirilmez.
+        const pairs = Math.min(removed.length, addedIdx.length);
+        for (let k = 0; k < pairs; k++) {
+            lines.push(`🔁 ${seatLabel(group, addedIdx[k].i)}: ${removed[k]} yerine ${addedIdx[k].n} geldi`);
+        }
+
+        // Hakemlerde koltuk değişimi (ör. Yardımcı Hakem Baş Hakem oldu) — sadece iki
+        // listede de bulunan isimler için; yeni gelen biri zaten yukarıda yazıldı.
+        if (group.key === "hakemler") {
+            newNames.forEach((name, i) => {
+                const oldIndex = oldNames.findIndex(o => norm(o) === norm(name));
+                if (oldIndex >= 0 && oldIndex !== i && group.seats[i]) {
+                    lines.push(`🔁 ${seatLabel(group, i)} artık ${name}`);
+                }
+            });
         }
     }
 
-    if (added === 0 && removed === 0) {
-        return "Maç bilgileri güncellendi";
-    }
-
-    // Tek rol grubunda değişiklik → daha spesifik cümle
-    if (changedRoles.length === 1) {
-        const role = changedRoles[0];
-        if (added > 0 && removed === 0) return `Kadroya ${added} ${role} eklendi`;
-        if (removed > 0 && added === 0) return `Kadrodan ${removed} ${role} çıkarıldı`;
-        return `${role.charAt(0).toLocaleUpperCase("tr")}${role.slice(1)} kadrosu değişti`;
-    }
-
-    // Birden fazla rol grubunda değişiklik → genel özet
-    if (added > 0 && removed === 0) return `Görevli kadrosuna ${added} kişi eklendi`;
-    if (removed > 0 && added === 0) return `Görevli kadrosundan ${removed} kişi çıkarıldı`;
-    return "Görevli kadrosu güncellendi";
+    return lines;
 }

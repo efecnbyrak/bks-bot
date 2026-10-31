@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { planNotifications } from "../src/change-notifier";
+import { planNotifications, filterFutureEvents } from "../src/change-notifier";
+import { CancelledMatchInfo } from "../src/db-writer";
 import { MatchData } from "../src/lib/match-parser";
 import { NewAssignmentInfo } from "../src/user-matcher";
 
@@ -13,92 +14,129 @@ function md(overrides: Partial<MatchData> = {}): MatchData {
         kaynak_dosya: "test", ...overrides,
     };
 }
-function newAsg(o: Partial<NewAssignmentInfo> & { userId: number }): NewAssignmentInfo {
+function newAsg(o: { userId: number; contentKey?: string; match?: MatchData }): NewAssignmentInfo {
+    const m = o.match ?? md();
     return {
-        matchId: 1, macAdi: "A - B", tarih: "07.09.2099", contentKey: "ck1",
-        matchData: md(), ...o,
+        userId: o.userId, matchId: 1, macAdi: m.mac_adi, tarih: m.tarih, saat: m.saat,
+        contentKey: o.contentKey ?? "ck1", matchData: m,
+    };
+}
+function cancel(o: { userIds: number[]; contentKey?: string; match?: MatchData }): CancelledMatchInfo {
+    const m = o.match ?? md();
+    return {
+        matchId: 10, matchKey: "", contentKey: o.contentKey ?? "ck1",
+        macAdi: m.mac_adi, tarih: m.tarih, saat: m.saat, affectedUserIds: o.userIds, matchData: m,
     };
 }
 
 describe("planNotifications", () => {
-    test("ROW_SHIFTED → 'UPDATED' bildirimi, 'ASSIGNED' DEĞİL", () => {
-        const { notifications } = planNotifications({
-            newAssignments: [newAsg({ userId: 1, contentKey: "ck1" })], // aynı kullanıcı yeni satıra da atandı
+    test("kadroda 'A yerine B' → maçta kalan herkese UPDATED, yeni gelene ASSIGNED", () => {
+        const oldM = md({ hakemler: ["ALİ", "CAN"], gozlemciler: ["G1"] });
+        const newM = md({ hakemler: ["DENİZ", "CAN"], gozlemciler: ["G1"] });
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 3, match: newM })], // DENİZ
+            cancellations: [cancel({ userIds: [1], match: oldM })], // ALİ
+            shifted: [2, 4].map(userId => ({
+                userId, macAdi: "A - B", tarih: "07.09.2099", saat: "16:00", contentKey: "ck1",
+                oldMatchData: oldM, newMatchData: newM,
+            })),
+        });
+        const byUser = (u: number) => out.filter(n => n.userId === u).map(n => n.kind);
+        assert.deepEqual(byUser(1), ["CANCELLED"]);
+        assert.deepEqual(byUser(2), ["UPDATED"]);
+        assert.deepEqual(byUser(4), ["UPDATED"]);
+        assert.deepEqual(byUser(3), ["ASSIGNED"]);
+        assert.deepEqual(out.find(n => n.userId === 2)!.changeLines, ["🔁 Baş Hakem: ALİ yerine DENİZ geldi"]);
+    });
+
+    test("ilk dolum: hakemler yazılıydı, gözlemci eklendi → hakemlere bildirim YOK", () => {
+        const oldM = md({ hakemler: ["ALİ", "CAN"] });
+        const newM = md({ hakemler: ["ALİ", "CAN"], gozlemciler: ["G1"] });
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 9, match: newM })],
             cancellations: [],
-            shifted: [{
-                userId: 1, macAdi: "A - B", tarih: "07.09.2099", contentKey: "ck1",
-                oldMatchData: md({ masa_gorevlileri: ["AHMET"] }),
-                newMatchData: md({ masa_gorevlileri: ["AHMET"], hakemler: ["X", "Y"] }),
-            }],
+            shifted: [{ userId: 1, macAdi: "A - B", tarih: "07.09.2099", contentKey: "ck1", oldMatchData: oldM, newMatchData: newM }],
         });
-        const n = notifications.find(x => x.userId === 1)!;
-        assert.equal(n.kind, "UPDATED");
-        assert.ok(n.changeSummary);
-        // Aynı kullanıcı için ikinci bir bildirim OLMAMALI
-        assert.equal(notifications.filter(x => x.userId === 1).length, 1);
+        assert.deepEqual(out.map(n => [n.userId, n.kind]), [[9, "ASSIGNED"]]);
     });
 
-    test("iptal + AYNI contentKey'de yeni atama → 'UPDATED' (değişti değil)", () => {
-        const { notifications, realCancellationGroups } = planNotifications({
-            newAssignments: [newAsg({ userId: 5, contentKey: "ckSAME", macAdi: "A - B" })],
-            cancellations: [{
-                matchId: 10, matchKey: "", contentKey: "ckSAME",
-                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [5],
-            }],
+    test("aynı turda iptal + AYNI maça geri yazılma, kadro aynı → hiç bildirim YOK", () => {
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 5 })],
+            cancellations: [cancel({ userIds: [5] })],
             shifted: [],
         });
-        assert.equal(notifications.find(x => x.userId === 5)!.kind, "UPDATED");
-        assert.equal(realCancellationGroups.length, 0);
+        assert.equal(out.length, 0);
     });
 
-    test("iptal + FARKLI contentKey'de yeni atama → 'CHANGED'", () => {
-        const { notifications } = planNotifications({
-            newAssignments: [newAsg({ userId: 5, contentKey: "ckNEW", macAdi: "C - D" })],
-            cancellations: [{
-                matchId: 10, matchKey: "", contentKey: "ckOLD",
-                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [5],
-            }],
+    test("aynı takımlar, tarih değişti → UPDATED (Değişiklik değil)", () => {
+        const oldM = md({ tarih: "07.09.2099" });
+        const newM = md({ tarih: "08.09.2099" });
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 5, contentKey: "ckNEW", match: newM })],
+            cancellations: [cancel({ userIds: [5], contentKey: "ckOLD", match: oldM })],
             shifted: [],
         });
-        const n = notifications.find(x => x.userId === 5)!;
-        assert.equal(n.kind, "CHANGED");
-        assert.equal(n.oldMacAdi, "A - B");
-        assert.equal(n.newMacAdi, "C - D");
+        assert.equal(out.length, 1);
+        assert.equal(out[0].kind, "UPDATED");
+        assert.equal(out[0].changeLines![0], "📅 Tarih: 7 Eylül Pazartesi → 8 Eylül Salı");
     });
 
-    test("sadece iptal → realCancellationGroups'a gider, notifications'da yok", () => {
-        const { notifications, realCancellationGroups } = planNotifications({
-            newAssignments: [],
-            cancellations: [{
-                matchId: 10, matchKey: "", contentKey: "ck1",
-                macAdi: "A - B", tarih: "07.09.2099", affectedUserIds: [7, 8],
-            }],
+    test("aynı gün başka maça kaydırıldı → CHANGED", () => {
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 5, contentKey: "ckNEW", match: md({ mac_adi: "C - D", saat: "18:00" }) })],
+            cancellations: [cancel({ userIds: [5], contentKey: "ckOLD" })],
             shifted: [],
         });
-        assert.equal(notifications.length, 0);
-        assert.equal(realCancellationGroups.length, 1);
-        assert.deepEqual(realCancellationGroups[0].userIds.sort(), [7, 8]);
+        assert.equal(out.length, 1);
+        assert.equal(out[0].kind, "CHANGED");
+        assert.equal(out[0].oldMatch!.mac_adi, "A - B");
+        assert.equal(out[0].match.mac_adi, "C - D");
     });
 
-    test("sadece yeni atama → 'ASSIGNED'", () => {
-        const { notifications } = planNotifications({
-            newAssignments: [newAsg({ userId: 9, contentKey: "ckX" })],
-            cancellations: [],
+    test("farklı günlerde iptal + atama → ayrı CANCELLED ve ASSIGNED", () => {
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 5, contentKey: "ckNEW", match: md({ mac_adi: "C - D", tarih: "10.09.2099" }) })],
+            cancellations: [cancel({ userIds: [5], contentKey: "ckOLD" })],
             shifted: [],
         });
-        assert.equal(notifications.find(x => x.userId === 9)!.kind, "ASSIGNED");
+        assert.deepEqual(out.map(n => n.kind).sort(), ["ASSIGNED", "CANCELLED"]);
     });
 
-    test("aynı maçtan çıkan birden fazla kullanıcı tek grupta toplanır", () => {
-        const { realCancellationGroups } = planNotifications({
-            newAssignments: [],
-            cancellations: [
-                { matchId: 1, matchKey: "", contentKey: "a", macAdi: "M", tarih: "T", affectedUserIds: [1, 2] },
-                { matchId: 2, matchKey: "", contentKey: "b", macAdi: "M", tarih: "T", affectedUserIds: [3] },
+    test("aynı turda iki yeni maça atanan kişi İKİ bildirim alır (eskiden tek)", () => {
+        const out = planNotifications({
+            newAssignments: [
+                newAsg({ userId: 7, contentKey: "a", match: md({ mac_adi: "A - B" }) }),
+                newAsg({ userId: 7, contentKey: "b", match: md({ mac_adi: "C - D", tarih: "09.09.2099" }) }),
             ],
+            cancellations: [],
             shifted: [],
         });
-        assert.equal(realCancellationGroups.length, 1);
-        assert.equal(realCancellationGroups[0].userIds.length, 3);
+        assert.equal(out.filter(n => n.userId === 7 && n.kind === "ASSIGNED").length, 2);
+    });
+
+    test("aynı olay iki kez gelse de tek bildirim", () => {
+        const out = planNotifications({
+            newAssignments: [newAsg({ userId: 7 }), newAsg({ userId: 7 })],
+            cancellations: [],
+            shifted: [],
+        });
+        assert.equal(out.length, 1);
+    });
+
+    test("oynanmış (geçmiş tarihli) maç dosyadan kalkınca bildirim YOK", () => {
+        const past = md({ tarih: "01.01.2020" });
+        const out = planNotifications({
+            newAssignments: [],
+            cancellations: [cancel({ userIds: [1], match: past })],
+            shifted: [],
+        });
+        assert.equal(out.length, 0);
+    });
+
+    test("bugün başlamış maç da geçmiş sayılır", () => {
+        const now = new Date("2099-09-07T14:00:00Z"); // 17:00 TRT, maç 16:00'da başladı
+        const f = filterFutureEvents({ newAssignments: [], cancellations: [cancel({ userIds: [1] })], shifted: [] }, now);
+        assert.equal(f.cancellations.length, 0);
     });
 });

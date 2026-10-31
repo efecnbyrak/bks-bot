@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeSquadChange } from "../src/lib/squad-change";
+import { diffMatch } from "../src/lib/squad-change";
 import { MatchData } from "../src/lib/match-parser";
 
 function md(overrides: Partial<MatchData> = {}): MatchData {
@@ -13,56 +13,63 @@ function md(overrides: Partial<MatchData> = {}): MatchData {
     };
 }
 
-describe("summarizeSquadChange", () => {
-    test("null girdi → genel mesaj", () => {
-        assert.equal(summarizeSquadChange(null, md()), "Görevli kadrosu güncellendi");
+describe("diffMatch", () => {
+    test("null girdi → değişiklik yok", () => {
+        assert.deepEqual(diffMatch(null, md()), []);
     });
 
-    test("tek rol grubuna ekleme → 'Kadroya N X eklendi'", () => {
-        const oldM = md({ hakemler: ["A"] });
-        const newM = md({ hakemler: ["A", "B", "C"] });
-        assert.equal(summarizeSquadChange(oldM, newM), "Kadroya 2 hakem eklendi");
+    test("boş yere ekleme (ilk dolum) → değişiklik SAYILMAZ", () => {
+        const oldM = md({ hakemler: ["ALİ VELİ", "AYŞE KAYA"] });
+        const newM = md({ hakemler: ["ALİ VELİ", "AYŞE KAYA"], gozlemciler: ["MEHMET DEMİR"], masa_gorevlileri: ["X Y"] });
+        assert.deepEqual(diffMatch(oldM, newM), []);
     });
 
-    test("tek rol grubundan çıkarma → 'Kadrodan N X çıkarıldı'", () => {
-        const oldM = md({ masa_gorevlileri: ["A", "B", "C"] });
-        const newM = md({ masa_gorevlileri: ["A"] });
-        assert.equal(summarizeSquadChange(oldM, newM), "Kadrodan 2 masa görevlisi çıkarıldı");
+    test("yerine kimse yazılmadan çıkarma → değişiklik SAYILMAZ", () => {
+        const oldM = md({ gozlemciler: ["MEHMET DEMİR"] });
+        const newM = md({ gozlemciler: [] });
+        assert.deepEqual(diffMatch(oldM, newM), []);
     });
 
-    test("tek rol grubunda isim değişimi (BİROL ÖZDAL → EVİN ÖZDEMİR)", () => {
-        const oldM = md({ masa_gorevlileri: ["BAŞAK ÇELİK", "ESER FIRIL", "BİROL ÖZDAL"] });
-        const newM = md({ masa_gorevlileri: ["BAŞAK ÇELİK", "ESER FIRIL", "EVİN ÖZDEMİR"] });
-        assert.equal(summarizeSquadChange(oldM, newM), "Masa görevlisi kadrosu değişti");
+    test("Baş Hakem değişti → 'A yerine B geldi'", () => {
+        const oldM = md({ hakemler: ["ALİ VELİ", "AYŞE KAYA"] });
+        const newM = md({ hakemler: ["CAN ER", "AYŞE KAYA"] });
+        assert.deepEqual(diffMatch(oldM, newM), ["🔁 Baş Hakem: ALİ VELİ yerine CAN ER geldi"]);
     });
 
-    test("birden fazla rol grubuna ekleme → genel özet", () => {
-        const oldM = md({ hakemler: ["A"] });
-        const newM = md({ hakemler: ["A", "B"], gozlemciler: ["G"], sahaKomiserleri: ["K"] });
-        assert.equal(summarizeSquadChange(oldM, newM), "Görevli kadrosuna 3 kişi eklendi");
+    test("masa ve gözlemci değişimi koltuk adıyla yazılır", () => {
+        const oldM = md({ masa_gorevlileri: ["M1", "M2", "M3"], gozlemciler: ["G1"] });
+        const newM = md({ masa_gorevlileri: ["M1", "YENİ", "M3"], gozlemciler: ["G2"] });
+        assert.deepEqual(diffMatch(oldM, newM), [
+            "🔁 Saat Görevlisi: M2 yerine YENİ geldi",
+            "🔁 Gözlemci: G1 yerine G2 geldi",
+        ]);
     });
 
-    test("kadro aynı (sadece sıra farkı) → 'Maç bilgileri güncellendi'", () => {
-        const oldM = md({ hakemler: ["A", "B"] });
-        const newM = md({ hakemler: ["B", "A"] });
-        assert.equal(summarizeSquadChange(oldM, newM), "Maç bilgileri güncellendi");
+    test("hakemler yer değiştirdi → koltuk satırları", () => {
+        const oldM = md({ hakemler: ["ALİ", "CAN"] });
+        const newM = md({ hakemler: ["CAN", "ALİ"] });
+        assert.deepEqual(diffMatch(oldM, newM), ["🔁 Baş Hakem artık CAN", "🔁 Yardımcı Hakem artık ALİ"]);
     });
 
-    test("gerçek vaka: 227821 → 228013 (isim değişimi + 4 kişi eklendi)", () => {
-        const oldM = md({
-            hakemler: ["HASAN HÜSEYİN DEVECİ", "EMRE EFE CİHAN"],
-            masa_gorevlileri: ["BAŞAK ÇELİK", "ESER FIRIL", "BİROL ÖZDAL"],
-            saglikcilar: ["MERVE KAYA"],
-        });
-        const newM = md({
-            hakemler: ["HASAN HÜSEYİN DEVECİ", "EMRE EFE CİHAN"],
-            masa_gorevlileri: ["BAŞAK ÇELİK", "ESER FIRIL", "EVİN ÖZDEMİR"],
-            saglikcilar: ["MERVE KAYA"],
-            gozlemciler: ["SAVAŞ ERTÜRK"],
-            sahaKomiserleri: ["AZMİ HAKAN ARK"],
-        });
-        // masa: 1 çıktı 1 girdi, gozlemci: +1, sahaKomiseri: +1 → çok rollü, net eklenen 2
-        const summary = summarizeSquadChange(oldM, newM);
-        assert.ok(summary.length > 0 && summary.length < 60);
+    test("tarih / saat / salon değişimi", () => {
+        const oldM = md({ tarih: "01.11.2026", saat: "12.00", salon: "A SALONU" });
+        const newM = md({ tarih: "02.11.2026", saat: "14:30", salon: "B SALONU" });
+        assert.deepEqual(diffMatch(oldM, newM), [
+            "📅 Tarih: 1 Kasım Pazar → 2 Kasım Pazartesi",
+            "⏰ Saat: 12:00 → 14:30",
+            "🏟️ Salon: A SALONU → B SALONU",
+        ]);
+    });
+
+    test("salonun sonradan doldurulması ve saat yazım farkı değişiklik değildir", () => {
+        const oldM = md({ salon: "", saat: "12.00" });
+        const newM = md({ salon: "B SALONU", saat: "12:00" });
+        assert.deepEqual(diffMatch(oldM, newM), []);
+    });
+
+    test("büyük/küçük harf ve boşluk farkı değişiklik değildir; '*' yer tutucusu isim sayılmaz", () => {
+        const oldM = md({ hakemler: ["ALİ  VELİ", "*"] });
+        const newM = md({ hakemler: ["Ali Veli", "-"] });
+        assert.deepEqual(diffMatch(oldM, newM), []);
     });
 });
