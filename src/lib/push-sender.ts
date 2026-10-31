@@ -59,6 +59,35 @@ export function supportsDataOnly(platform: string | null | undefined, appVersion
     return true;
 }
 
+// İki mesaj biçimi. İkisinin de `data`'sı başlık ve metni TAŞIR: mobil (1.0.13+)
+// bildirime dokunulunca uygulama içinde detay sayfası açar ve tüm bilgiyi buradan
+// okur — klasik biçimde de (iOS, eski Android) sayfa boş kalmasın.
+export function buildPushMessages(title: string, body: string, data: Record<string, string>) {
+    const fullData = { ...data, title, body, channel: "matches" };
+    // Klasik biçim (eski sürümler, iOS): bildirimi sistem gösterir.
+    // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
+    // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
+    const classic = {
+        notification: { title, body },
+        data: fullData,
+        android: {
+            priority: "high" as const,
+            notification: { sound: "default", channelId: "matches" },
+        },
+        apns: {
+            headers: { "apns-priority": "10", "apns-push-type": "alert" },
+            payload: { aps: { sound: "default" } },
+        },
+    };
+    // Sadece veri (1.0.12+ Android): uygulama kendisi çizer.
+    // "high" öncelik şart — yoksa uygulama kapalıyken mesaj Doze'da bekletilir.
+    const dataOnly = {
+        data: fullData,
+        android: { priority: "high" as const },
+    };
+    return { classic, dataOnly };
+}
+
 async function sendPushToUsers(
     userIds: number[],
     title: string,
@@ -88,27 +117,7 @@ async function sendPushToUsers(
     // yönlendirme yapabilsin diye tüm maç bildirimlerine eklenen ortak alan.
     const data = { type: dataType, screen: "MATCHES", ...extraData };
 
-    // Klasik biçim (eski sürümler, iOS): bildirimi sistem gösterir.
-    // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
-    // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
-    const classic = {
-        notification: { title, body },
-        data,
-        android: {
-            priority: "high" as const,
-            notification: { sound: "default", channelId: "matches" },
-        },
-        apns: {
-            headers: { "apns-priority": "10", "apns-push-type": "alert" },
-            payload: { aps: { sound: "default" } },
-        },
-    };
-    // Sadece veri (1.0.12+ Android): başlık/metin/kanal data içinde, uygulama çizer.
-    // "high" öncelik şart — yoksa uygulama kapalıyken mesaj Doze'da bekletilir.
-    const dataOnly = {
-        data: { ...data, title, body, channel: "matches" },
-        android: { priority: "high" as const },
-    };
+    const { classic, dataOnly } = buildPushMessages(title, body, data);
 
     const groups = [
         { message: dataOnly, tokens: valid.filter((r: TokenRow) => supportsDataOnly(r.platform, r.appVersion)).map((r: TokenRow) => r.token) },
