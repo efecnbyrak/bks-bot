@@ -63,7 +63,7 @@ export function supportsDataOnly(platform: string | null | undefined, appVersion
 // bildirime dokunulunca uygulama içinde detay sayfası açar ve tüm bilgiyi buradan
 // okur — klasik biçimde de (iOS, eski Android) sayfa boş kalmasın.
 export function buildPushMessages(title: string, body: string, data: Record<string, string>) {
-    const fullData = { ...data, title, body, channel: "matches" };
+    const fullData: Record<string, string> = { ...data, title, body, channel: "matches" };
     // Klasik biçim (eski sürümler, iOS): bildirimi sistem gösterir.
     // Anlık teslim: web lib/push-notifications.ts ile aynı — Android "high"
     // öncelik (Doze'da beklemesin), iOS apns-priority 10 + alert.
