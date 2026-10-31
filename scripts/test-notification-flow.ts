@@ -1,64 +1,82 @@
 import crypto from "crypto";
 import { db } from "../src/db";
 import { reconcileAndNotify, flushDueNotifications } from "../src/notification-outbox";
-import { formatDayTR } from "../src/lib/notification-text";
 import { NewAssignmentInfo } from "../src/user-matcher";
-import { CancelledMatchInfo, ShiftedAssignmentInfo } from "../src/db-writer";
+import { CancelledMatchInfo, ShiftedAssignmentInfo, parsedRowToMatchData } from "../src/db-writer";
 import { MatchData } from "../src/lib/match-parser";
+import { formatDayTR } from "../src/lib/notification-text";
 
-// Test maçının sabit bilgileri — bildirim metninde maç detayının (kategori, salon,
-// görevliler) nasıl göründüğünü telefonda kontrol edebilmek için dolu tutuluyor.
-// Tarih YARIN: "maç başladı" kuralı (geçmiş maça bildirim yok) testi düşürmesin.
-const TEST_SAAT = "18:00";
-const TEST_SALON = "TEST SALONU";
-const TEST_KATEGORI = "U14EB";
-const TEST_HAKEMLER = ["TEST KULLANICI", "TEST ESKİ HAKEM"];
-const TEST_MASA = ["TEST SAYI", "TEST SAAT", "TEST ŞUT SAATİ"];
-
-function testTarih(): string {
-    const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    return `${dd}.${mm}.${d.getUTCFullYear()}`;
-}
-
-function stubMatchData(macAdi: string, tarih: string, hakemler: string[] = TEST_HAKEMLER): MatchData {
-    return {
-        mac_adi: macAdi, tarih, saat: TEST_SAAT, salon: TEST_SALON,
-        kategori: TEST_KATEGORI, ligTuru: "TEST",
-        hakemler, masa_gorevlileri: TEST_MASA, saglikcilar: [],
-        istatistikciler: [], gozlemciler: [], sahaKomiserleri: [],
-        kaynak_dosya: TEST_MARKER,
-    };
-}
-
-// İptal / Güncellendi / Değişiklik artık teyit kuyruğunda 10 dk bekliyor. Testte
-// beklememek için SADECE bu test kullanıcısının bekleyen kayıtlarını şimdiye çekip
-// kuyruğu işletiyoruz — canlı kuyruktaki diğer kayıtlar erkene alınmaz.
-async function confirmNow(userId: number) {
-    const n = await db.matchNotificationOutbox.updateMany({
-        where: { userId, status: "PENDING" },
-        data: { dueAt: new Date() },
-    });
-    console.log(`Teyit kuyruğu: test kullanıcısının ${n.count} bekleyen kaydı hemen işleniyor...`);
-    await flushDueNotifications();
-}
-
-// Uçtan uca bildirim testi — GERÇEK push token'a GERÇEK bildirim gönderir.
-// Kullanım:
-//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts assign   -> "Maça Atandınız" bildirimini gönderir, sahte parsedMatch+assignment oluşturur
-//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts cancel  -> az önce oluşturulan atamayı iptal eder, "İptal Edildi" bildirimini gönderir
-//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts change  -> mevcut aktif test maçını iptal edip AYNI ANDA yeni bir maça atar, "Maçınız Değişti" bildirimini test eder
-//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts update  -> kullanıcı AYNI maçta kalır, sadece kadrosu değişir (ROW_SHIFTED), "Maçınız Güncellendi" bildirimini test eder
-//   TEST_USER_ID=123 npx ts-node scripts/test-notification-flow.ts cleanup -> test verilerini DB'den siler
+// Uçtan uca bildirim testi — GERÇEK push token'a GERÇEK bildirim gönderir ve gerçek
+// sistemle AYNI yolu izler (planWithPending → Atama anında, diğerleri teyit kuyruğu →
+// flushDueNotifications). Mesajlar canlıdakiyle birebir aynı biçimde gelir.
 //
-// "assign" ve "cancel" adımları arasında istediğin kadar bekleyebilirsin (örn. 5 dk) —
-// her ikisi de ayrı process çalıştırması olduğu için zamanlama tamamen sana bağlı.
-// "change" ve "update" tek başına da çalışır: aktif bir test maçı yoksa önce birini oluşturur.
+// Kullanım (sırayla çalıştırılması önerilir):
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts assign      → 🔔 Maç Atamanız Geldi!            (anında)
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts update      → 📝 Maçınız Güncellendi             ("Yardımcı Hakem: A yerine B geldi")
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts reschedule  → 📝 Maçınız Güncellendi             ("📅 Tarih: … → …", "⏰ Saat: … → …")
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts change      → 🔄 Atamanızda Değişiklik Var        (aynı gün başka maç)
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts cancel      → ❌ Maç Atamanız İptal Edildi
+//   TEST_USER_ID=9 npx ts-node scripts/test-notification-flow.ts glitch      → HİÇ bildirim gelmemeli (yarım düzenleme: çıkarıldı + geri yazıldı)
+//   npx ts-node scripts/test-notification-flow.ts cleanup                    → test maçlarını ve test "Maç İadesi" duyurularını siler
+//
+// Test maçları SADECE `kaynakDosya = TEST_MARKER` satırlarıdır; gerçek maçlara, atamalara ve
+// "ödendi" işaretlerine hiçbir komut dokunmaz. Görevli isimleri kurgusaldır ("DENEME" soyadı),
+// gerçek bir kişiyle (telefon rehberi eşleşmesi) karışmasın diye. `tarihDate` bilinçli olarak
+// boş bırakılır: Ek Ödeme dağıtımı (`tarihDate ≤ şimdi`) test maçını asla saymaz.
+// Teyit kuyruğunda bekleme olmasın diye SADECE test kullanıcısının kayıtları hemen işletilir
+// (canlı kuyruktaki diğer kayıtlar erkene alınmaz).
 
 const TEST_MARKER = "__TEST_NOTIFICATION_FLOW__";
 
-async function createTestMatchAndAssignment(userId: number, macAdi: string) {
+// Canlıdaki bir Yerel Lig maçının birebir biçimi. İlk hakem koltuğuna test kullanıcısının
+// kendi adı yazılır (gerçekte de atama ismin listede olmasıyla kurulur).
+const MATCH_A = "DENEME SPOR (A) - ÖRNEK BASKET";
+const MATCH_B = "YILDIZ DENEME SK - ÖRNEK KOLEJİ (B)";
+const LIG = "Yerel Lig";
+const KATEGORI = "U14EB";
+const SALON = "DENEME SPOR SALONU";
+const SAAT = "18:00";
+const OTHERS = {
+    yardimci: "AHMET DENEME",
+    yeniYardimci: "MURAT DENEME",
+    masa: ["AYŞE DENEME", "MEHMET DENEME", "ELİF DENEME"],
+    istatistik: ["CAN DENEME"],
+    saglik: ["ZEYNEP DENEME"],
+    gozlemci: ["HASAN DENEME"],
+    komiser: ["SELİN DENEME"],
+};
+
+// dd.MM.yyyy — "maç başladı" kuralı (geçmiş maça bildirim yok) testi düşürmesin diye ileri tarih.
+function dayFromNow(days: number): string {
+    const d = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${d.getUTCFullYear()}`;
+}
+
+interface TestUser { userId: number; name: string; isReferee: boolean }
+
+// Test kullanıcısının profil adı — hakemse Baş Hakem, görevliyse Sayı Görevlisi koltuğuna yazılır.
+async function loadUser(userId: number): Promise<TestUser> {
+    const u = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+            referee: { select: { firstName: true, lastName: true } },
+            official: { select: { firstName: true, lastName: true } },
+        },
+    });
+    const p = u?.referee ?? u?.official;
+    if (!p) throw new Error(`userId=${userId} için hakem/görevli profili bulunamadı`);
+    return { userId, name: `${p.firstName} ${p.lastName}`.toLocaleUpperCase("tr"), isReferee: !!u?.referee };
+}
+
+interface Squad { hakemler: string[]; masa: string[] }
+
+function squadFor(user: TestUser, yardimci = OTHERS.yardimci): Squad {
+    return user.isReferee
+        ? { hakemler: [user.name, yardimci], masa: OTHERS.masa }
+        : { hakemler: [OTHERS.yardimci, yardimci === OTHERS.yardimci ? OTHERS.yeniYardimci : yardimci], masa: [user.name, ...OTHERS.masa.slice(1)] };
+}
+
+async function createMatch(user: TestUser, opts: { macAdi: string; tarih: string; saat: string; squad: Squad }) {
     const driveFile = await db.driveFile.create({
         data: {
             driveFileId: `${TEST_MARKER}_FILE_${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -72,168 +90,145 @@ async function createTestMatchAndAssignment(userId: number, macAdi: string) {
     const match = await db.parsedMatch.create({
         data: {
             matchKey: `${TEST_MARKER}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            // contentKey kolonu @db.VarChar(32) — worker'ın computeContentKey'i gibi
-            // sha256'nın ilk 32 karakteri kullanılır (aksi halde P2000 "value too long")
-            contentKey: crypto
-                .createHash("sha256")
-                .update(`${TEST_MARKER}|${macAdi}|${Date.now()}|${Math.random()}`)
-                .digest("hex")
-                .substring(0, 32),
-            macAdi,
-            tarih: testTarih(),
-            saat: TEST_SAAT,
-            salon: TEST_SALON,
-            kategori: TEST_KATEGORI,
-            ligTuru: "TEST",
-            hakemler: TEST_HAKEMLER,
-            masaGorevlileri: TEST_MASA,
-            saglikcilar: [],
-            istatistikciler: [],
-            gozlemciler: [],
-            sahaKomiserleri: [],
+            // contentKey kolonu VarChar(32) — worker'ın computeContentKey'i gibi sha256'nın ilk 32 karakteri
+            contentKey: crypto.createHash("sha256")
+                .update(`${TEST_MARKER}|${opts.macAdi}|${opts.tarih}|${opts.saat}|${Math.random()}`)
+                .digest("hex").substring(0, 32),
+            macAdi: opts.macAdi,
+            tarih: opts.tarih,
+            saat: opts.saat,
+            salon: SALON,
+            kategori: KATEGORI,
+            ligTuru: LIG,
+            hakemler: opts.squad.hakemler,
+            masaGorevlileri: opts.squad.masa,
+            saglikcilar: OTHERS.saglik,
+            istatistikciler: OTHERS.istatistik,
+            gozlemciler: OTHERS.gozlemci,
+            sahaKomiserleri: OTHERS.komiser,
             kaynakDosya: TEST_MARKER,
             driveFileId: driveFile.id,
         },
     });
 
     await db.userMatchAssignment.create({
-        data: {
-            userId,
-            matchId: match.id,
-            role: "hakem",
-            nameInSpreadsheet: "TEST KULLANICI",
-        },
+        data: { userId: user.userId, matchId: match.id, role: user.isReferee ? "hakem" : "masa", nameInSpreadsheet: user.name },
     });
-
     return match;
 }
 
-async function assign(userId: number) {
-    const match = await createTestMatchAndAssignment(userId, "TEST A vs TEST B");
+type Row = Awaited<ReturnType<typeof createMatch>>;
 
-    const newAssignments: NewAssignmentInfo[] = [
-        {
-            userId, matchId: match.id, macAdi: match.macAdi, tarih: match.tarih,
-            contentKey: match.contentKey, matchData: stubMatchData(match.macAdi, match.tarih),
-        },
-    ];
-
-    console.log(`Test maçı oluşturuldu: matchId=${match.id}`);
-    console.log(`Atama bildirimi tetikleniyor (maç günü: ${formatDayTR(match.tarih)})...`);
-    await reconcileAndNotify(newAssignments, [], false);
-    console.log("Tamamlandı. Telefonuna '🔔 Maç Atamanız Geldi!' bildirimi anında gitmiş olmalı.");
+// En son aktif test maçı; yoksa yarın 18:00'e bir tane kurar (her komut tek başına çalışabilsin).
+async function activeMatchOrCreate(user: TestUser): Promise<Row> {
+    const m = await db.parsedMatch.findFirst({
+        where: { kaynakDosya: TEST_MARKER, cancelledAt: null, userAssignments: { some: { userId: user.userId } } },
+        orderBy: { id: "desc" },
+    });
+    if (m) return m;
+    console.log("Aktif test maçı yok, önce bir tane oluşturuluyor (sessiz)...");
+    return createMatch(user, { macAdi: MATCH_A, tarih: dayFromNow(1), saat: SAAT, squad: squadFor(user) });
 }
 
-async function change(userId: number) {
-    // Kullanıcının hâlâ aktif bir test ataması var mı — yoksa önce bir tane oluştur
-    // (kullanıcı "assign" çalıştırmadan direkt "change" çağırırsa da test çalışsın diye).
-    let oldMatch = await db.parsedMatch.findFirst({
-        where: { kaynakDosya: TEST_MARKER, cancelledAt: null },
-        orderBy: { createdAt: "desc" },
-    });
+const data = (r: Row): MatchData => parsedRowToMatchData(r);
 
-    if (!oldMatch) {
-        console.log("Aktif test maçı yok, önce eski maç (TEST A vs TEST B) oluşturuluyor...");
-        oldMatch = await createTestMatchAndAssignment(userId, "TEST A vs TEST B");
-    }
-
-    // Eski maçı iptal et
-    await db.parsedMatch.update({
-        where: { id: oldMatch.id },
-        data: { cancelledAt: new Date(), cancelReason: "Test: başka maça değiştirildi" },
-    });
-
-    // Aynı anda yeni bir maça ata — federasyonun "17:00'da A vs B'ye koydu, 17:30'da
-    // G vs H'ye taşıdı" senaryosunu simüle eder.
-    const newMatch = await createTestMatchAndAssignment(userId, "TEST G vs TEST H");
-
-    const cancellations: CancelledMatchInfo[] = [
-        {
-            matchId: oldMatch.id, matchKey: oldMatch.matchKey, macAdi: oldMatch.macAdi,
-            tarih: oldMatch.tarih, saat: oldMatch.saat, affectedUserIds: [userId], contentKey: oldMatch.contentKey,
-            matchData: stubMatchData(oldMatch.macAdi, oldMatch.tarih),
-        },
-    ];
-    const newAssignments: NewAssignmentInfo[] = [
-        {
-            userId, matchId: newMatch.id, macAdi: newMatch.macAdi, tarih: newMatch.tarih,
-            contentKey: newMatch.contentKey, matchData: stubMatchData(newMatch.macAdi, newMatch.tarih),
-        },
-    ];
-
-    console.log(`Eski maç iptal edildi: matchId=${oldMatch.id} (${oldMatch.macAdi})`);
-    console.log(`Yeni maça atandı: matchId=${newMatch.id} (${newMatch.macAdi})`);
-    console.log("TEK reconcileAndNotify çağrısıyla 'değişti' mantığı tetikleniyor...");
-    await reconcileAndNotify(newAssignments, cancellations, false);
-    await confirmNow(userId);
-    console.log("Tamamlandı. Telefonuna '🔄 Atamanızda Değişiklik Var' bildirimi gitmiş olmalı (iptal DEĞİL, atama DEĞİL).");
+function asAssignment(user: TestUser, r: Row): NewAssignmentInfo {
+    return { userId: user.userId, matchId: r.id, macAdi: r.macAdi, tarih: r.tarih, saat: r.saat, contentKey: r.contentKey, matchData: data(r) };
 }
 
-async function update(userId: number) {
-    // Kullanıcının hâlâ aktif bir test ataması var mı — yoksa önce bir tane oluştur
-    // (change() ile aynı desen: "update" tek başına da çalışsın diye).
-    let match = await db.parsedMatch.findFirst({
-        where: { kaynakDosya: TEST_MARKER, cancelledAt: null },
-        orderBy: { createdAt: "desc" },
-    });
+function asCancellation(user: TestUser, r: Row): CancelledMatchInfo {
+    return {
+        matchId: r.id, matchKey: r.matchKey, macAdi: r.macAdi, tarih: r.tarih, saat: r.saat,
+        affectedUserIds: [user.userId], contentKey: r.contentKey, matchData: data(r),
+    };
+}
 
-    if (!match) {
-        console.log("Aktif test maçı yok, önce oluşturuluyor (TEST A vs TEST B)...");
-        match = await createTestMatchAndAssignment(userId, "TEST A vs TEST B");
-    }
+// Gerçek sistemde iptal edilen satır cancelledAt alır ve kişinin ataması silinir — aynısı.
+async function removeFromMatch(user: TestUser, r: Row, reason: string) {
+    await db.userMatchAssignment.deleteMany({ where: { userId: user.userId, matchId: r.id } });
+    await db.parsedMatch.update({ where: { id: r.id }, data: { cancelledAt: new Date(), cancelReason: reason } });
+}
 
-    // Gerçek ROW_SHIFTED senaryosu: kullanıcı AYNI maçta kalıyor, sadece Yardımcı Hakem
-    // değişiyor ("TEST ESKİ HAKEM yerine TEST YENİ HAKEM geldi"). Boş yere ekleme artık
-    // bildirim üretmediği için senaryo bir DEĞİŞİM olmak zorunda. Teyit adımı farkı DB'nin
-    // güncel satırından yeniden hesapladığı için satırın kadrosu da güncellenir.
-    const newHakemler = ["TEST KULLANICI", "TEST YENİ HAKEM"];
-    await db.parsedMatch.update({ where: { id: match.id }, data: { hakemler: newHakemler } });
-    const oldMatchData = stubMatchData(match.macAdi, match.tarih, TEST_HAKEMLER);
-    const newMatchData = stubMatchData(match.macAdi, match.tarih, newHakemler);
+async function confirmNow(userId: number) {
+    const n = await db.matchNotificationOutbox.updateMany({ where: { userId, status: "PENDING" }, data: { dueAt: new Date() } });
+    console.log(`Teyit kuyruğu: test kullanıcısının ${n.count} bekleyen kaydı hemen işleniyor (canlıda 10 dk bekler)...`);
+    await flushDueNotifications();
+}
 
-    const shifted: ShiftedAssignmentInfo[] = [
-        {
-            userId, macAdi: match.macAdi, tarih: match.tarih, contentKey: match.contentKey,
-            oldMatchData, newMatchData,
-        },
-    ];
+async function assign(user: TestUser) {
+    const r = await createMatch(user, { macAdi: MATCH_A, tarih: dayFromNow(1), saat: SAAT, squad: squadFor(user) });
+    console.log(`Maç kuruldu: ${r.macAdi} · ${formatDayTR(r.tarih)} ${r.saat}`);
+    await reconcileAndNotify([asAssignment(user, r)], [], false);
+    console.log("Beklenen: 🔔 Maç Atamanız Geldi! (anında)");
+}
 
-    console.log(`Mevcut test maçı kadrosu güncelleniyor: matchId=${match.id} (${match.macAdi})`);
-    console.log("TEK reconcileAndNotify çağrısıyla ROW_SHIFTED mantığı tetikleniyor...");
+async function update(user: TestUser) {
+    const r = await activeMatchOrCreate(user);
+    const oldData = data(r);
+    // Federasyon Yardımcı Hakemi değiştirdi: DB satırı da güncellenir (teyit farkı güncel satırdan hesaplar).
+    const yardimci = r.hakemler.includes(OTHERS.yeniYardimci) ? OTHERS.yardimci : OTHERS.yeniYardimci;
+    const newSquad = squadFor(user, yardimci);
+    const updated = await db.parsedMatch.update({ where: { id: r.id }, data: { hakemler: newSquad.hakemler } });
+    const shifted: ShiftedAssignmentInfo[] = [{
+        userId: user.userId, macAdi: r.macAdi, tarih: r.tarih, saat: r.saat, contentKey: r.contentKey,
+        oldMatchData: oldData, newMatchData: data(updated),
+    }];
     await reconcileAndNotify([], [], false, shifted);
-    await confirmNow(userId);
-    console.log("Tamamlandı. Telefonuna '📝 Maçınız Güncellendi' bildirimi gitmiş olmalı (Yardımcı Hakem: TEST ESKİ HAKEM yerine TEST YENİ HAKEM geldi).");
+    await confirmNow(user.userId);
+    console.log(`Beklenen: 📝 Maçınız Güncellendi — "Yardımcı Hakem: ${oldData.hakemler[1]} yerine ${newSquad.hakemler[1]} geldi"`);
 }
 
-async function cancel(userId: number) {
-    const match = await db.parsedMatch.findFirst({
-        where: { kaynakDosya: TEST_MARKER, cancelledAt: null },
-        orderBy: { createdAt: "desc" },
+async function reschedule(user: TestUser) {
+    const r = await activeMatchOrCreate(user);
+    // Aynı maç (aynı takımlar) başka güne ve saate alındı: gerçekte contentKey değişir →
+    // eski satır iptal + yeni satıra atama gelir, sistem bunu "Güncellendi" sayar.
+    const newSaat = r.saat === "20:00" ? SAAT : "20:00";
+    const newTarih = dayFromNow(r.tarih === dayFromNow(1) ? 2 : 1);
+    await removeFromMatch(user, r, "Test: tarih/saat değişti");
+    const n = await createMatch(user, {
+        macAdi: r.macAdi, tarih: newTarih, saat: newSaat,
+        squad: { hakemler: r.hakemler, masa: r.masaGorevlileri },
     });
+    await reconcileAndNotify([asAssignment(user, n)], [asCancellation(user, r)], false);
+    await confirmNow(user.userId);
+    console.log(`Beklenen: 📝 Maçınız Güncellendi — "📅 Tarih: ${formatDayTR(r.tarih)} → ${formatDayTR(newTarih)}", "⏰ Saat: ${r.saat} → ${newSaat}"`);
+}
 
-    if (!match) {
-        console.error("Aktif bir test maçı bulunamadı. Önce 'assign' komutunu çalıştır.");
-        process.exit(1);
-    }
+async function change(user: TestUser) {
+    const r = await activeMatchOrCreate(user);
+    // Aynı GÜN farklı bir maça kaydırıldı → Değişiklik.
+    const other = r.macAdi === MATCH_A ? MATCH_B : MATCH_A;
+    await removeFromMatch(user, r, "Test: başka maça değiştirildi");
+    const n = await createMatch(user, { macAdi: other, tarih: r.tarih, saat: r.saat === SAAT ? "20:00" : SAAT, squad: squadFor(user) });
+    await reconcileAndNotify([asAssignment(user, n)], [asCancellation(user, r)], false);
+    await confirmNow(user.userId);
+    console.log(`Beklenen: 🔄 Atamanızda Değişiklik Var — yeni maç ${other}, eski maç ${r.macAdi}`);
+}
 
-    await db.parsedMatch.update({
-        where: { id: match.id },
-        data: { cancelledAt: new Date(), cancelReason: "Test iptali" },
+async function cancel(user: TestUser) {
+    const r = await activeMatchOrCreate(user);
+    await removeFromMatch(user, r, "Test iptali");
+    await reconcileAndNotify([], [asCancellation(user, r)], false);
+    await confirmNow(user.userId);
+    console.log("Beklenen: ❌ Maç Atamanız İptal Edildi (+ Duyurular'da test 'Maç İadesi' kaydı, cleanup siler)");
+}
+
+async function glitch(user: TestUser) {
+    const r = await activeMatchOrCreate(user);
+    // 29 Ekim senaryosu: federasyon düzenlerken isim bir an silindi (iptal kuyruğa girer)...
+    await db.userMatchAssignment.deleteMany({ where: { userId: user.userId, matchId: r.id } });
+    await reconcileAndNotify([], [asCancellation(user, r)], false);
+    // ...birkaç dakika sonra aynı maça geri yazıldı (yeni atama olarak gelir).
+    await db.userMatchAssignment.create({
+        data: { userId: user.userId, matchId: r.id, role: user.isReferee ? "hakem" : "masa", nameInSpreadsheet: user.name },
     });
-
-    const cancellations: CancelledMatchInfo[] = [
-        {
-            matchId: match.id, matchKey: match.matchKey, macAdi: match.macAdi,
-            tarih: match.tarih, saat: match.saat, affectedUserIds: [userId], contentKey: match.contentKey,
-            matchData: stubMatchData(match.macAdi, match.tarih),
-        },
-    ];
-
-    console.log(`Test maçı iptal edildi: matchId=${match.id}`);
-    console.log("İptal bildirimi kuyruğa yazılıyor...");
-    await reconcileAndNotify([], cancellations, false);
-    await confirmNow(userId);
-    console.log("Tamamlandı. Telefonuna '❌ Maç Atamanız İptal Edildi' bildirimi gitmiş olmalı.");
+    await reconcileAndNotify([asAssignment(user, r)], [], false);
+    await confirmNow(user.userId);
+    const last = await db.matchNotificationOutbox.findFirst({
+        where: { userId: user.userId }, orderBy: { id: "desc" }, select: { status: true, dropReason: true },
+    });
+    console.log(`Kuyruk sonucu: ${last?.status} — ${last?.dropReason ?? ""}`);
+    console.log("Beklenen: HİÇ bildirim gelmemeli (kayıt DROPPED, 'Aynı turda yeniden atandı')");
 }
 
 async function cleanup() {
@@ -242,29 +237,38 @@ async function cleanup() {
         await db.parsedMatch.deleteMany({ where: { driveFileId: f.id } });
         await db.driveFile.delete({ where: { id: f.id } });
     }
-    console.log(`Temizlendi: ${files.length} test dosyası ve ilişkili maç/atama kayıtları silindi.`);
+    // İptal testlerinin ürettiği otomatik "Maç İadesi" duyuruları (sadece test maç adları).
+    const ann = await db.announcement.deleteMany({
+        where: {
+            senderId: null,
+            subject: { in: [MATCH_A, MATCH_B, "TEST A vs TEST B", "TEST G vs TEST H"].map(m => `Maç İadesi: ${m}`) },
+        },
+    });
+    console.log(`Temizlendi: ${files.length} test dosyası (+ maç/atamalar), ${ann.count} test duyurusu.`);
 }
 
+const COMMANDS = ["assign", "update", "reschedule", "change", "cancel", "glitch", "cleanup"] as const;
+type Command = (typeof COMMANDS)[number];
+
 async function main() {
-    const command = process.argv[2];
-    const userId = parseInt(process.env.TEST_USER_ID || "", 10);
-
-    if (!command || !["assign", "cancel", "change", "update", "cleanup"].includes(command)) {
-        console.error("Kullanım: TEST_USER_ID=<id> npx ts-node scripts/test-notification-flow.ts <assign|cancel|change|update|cleanup>");
+    const command = process.argv[2] as Command;
+    if (!COMMANDS.includes(command)) {
+        console.error(`Kullanım: TEST_USER_ID=<id> npx ts-node scripts/test-notification-flow.ts <${COMMANDS.join("|")}>`);
         process.exit(1);
     }
-
-    if (command !== "cleanup" && (!userId || isNaN(userId))) {
-        console.error("TEST_USER_ID env değişkeni geçerli bir sayı olmalı.");
-        process.exit(1);
+    if (command === "cleanup") {
+        await cleanup();
+    } else {
+        const userId = parseInt(process.env.TEST_USER_ID || "", 10);
+        if (!userId || isNaN(userId)) {
+            console.error("TEST_USER_ID env değişkeni geçerli bir sayı olmalı.");
+            process.exit(1);
+        }
+        const user = await loadUser(userId);
+        console.log(`Test kullanıcısı: ${user.name} (userId=${userId})`);
+        const run = { assign, update, reschedule, change, cancel, glitch }[command];
+        await run(user);
     }
-
-    if (command === "assign") await assign(userId);
-    else if (command === "cancel") await cancel(userId);
-    else if (command === "change") await change(userId);
-    else if (command === "update") await update(userId);
-    else if (command === "cleanup") await cleanup();
-
     await db.$disconnect();
 }
 
