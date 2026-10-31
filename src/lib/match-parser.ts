@@ -1,4 +1,5 @@
 import type ExcelJS from "exceljs";
+import { cellNameMatches } from "./name-match";
 
 export interface MatchData {
     mac_adi: string;
@@ -52,48 +53,12 @@ function normalizeTR(name: string): string {
 }
 
 /**
- * Fuzzy name matching for Turkish names (~99% accuracy).
- *
- * Rules:
- * 1. Last name must match (exact or Levenshtein ≤ 1 for names ≥ 5 chars)
- * 2. First name parts must match (exact or Levenshtein ≤ 1 for parts ≥ 3 chars)
- * 3. Name order doesn't matter: "Bayrak Efe Can" = "Efe Can Bayrak"
- * 4. Case insensitive with Turkish char normalization
+ * Hücre ismi bu profile uyuyor mu? Kural `src/lib/name-match.ts`'te (web ikiziyle
+ * birlikte, 2026-11-01) — burada sadece eski imza korunuyor. Hücreye birden çok
+ * kişi uyduğunda kime ait olduğuna `resolveCellCandidates` karar verir.
  */
 export function nameMatches(cellName: string, firstName: string, lastName: string): boolean {
-    if (!cellName || cellName.length < 3) return false;
-    if (!firstName || !lastName) return false;
-
-    const cellNorm = normalizeTR(cellName);
-    const fNorm = normalizeTR(firstName);
-    const lNorm = normalizeTR(lastName);
-
-    const cellWords = cellNorm.split(/[\s,.;\-/()]+/).filter(w => w.length > 0);
-    const firstNameParts = fNorm.split(/\s+/).filter(w => w.length > 0);
-    const lastNameParts = lNorm.split(/\s+/).filter(w => w.length > 0);
-
-    const fuzzyMatch = (a: string, b: string, minLen: number): boolean => {
-        if (a === b) return true;
-        if (a.length < minLen || b.length < minLen) return false;
-        if (Math.abs(a.length - b.length) > 1) return false;
-        return levenshteinSimple(a, b) <= 1;
-    };
-
-    const lastNameMatchedWords: string[] = [];
-    for (const lnPart of lastNameParts) {
-        const matched = cellWords.find(cw => fuzzyMatch(cw, lnPart, 5));
-        if (!matched) return false;
-        lastNameMatchedWords.push(matched);
-    }
-
-    const remainingWords = cellWords.filter(w => !lastNameMatchedWords.includes(w));
-
-    for (const fnPart of firstNameParts) {
-        const found = remainingWords.some(rw => fuzzyMatch(rw, fnPart, 3));
-        if (!found) return false;
-    }
-
-    return true;
+    return cellNameMatches(cellName, firstName, lastName);
 }
 
 // ============================================================

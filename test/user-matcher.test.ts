@@ -159,3 +159,71 @@ describe("buildUserAssignments DRY_RUN", () => {
         assert.equal(result.assignmentCount, 1);
     });
 });
+
+// 2026-11-01 canlı vaka: "Cem Akan" (gözlemci), "AYHAN CEM AKAN" (hakem) ve
+// "ASLAN CEM AKAN" (istatistikçi) üç farklı kişi. Eski kullanıcı-bazlı döngü
+// Cem Akan'a diğer ikisinin hücresini de yazıyordu (yanlış rol + yanlış maç).
+describe("buildUserAssignments isim çakışması", () => {
+    function stubMethod<T extends object, K extends keyof T>(t: import("node:test").TestContext, obj: T, key: K, impl: T[K]) {
+        const original = obj[key];
+        obj[key] = impl;
+        t.after(() => { obj[key] = original; });
+    }
+
+    function mockDb(t: import("node:test").TestContext, referees: UserProfile[], officials: UserProfile[]) {
+        stubMethod(t, db.referee, "findMany", (async () => referees) as unknown as typeof db.referee.findMany);
+        stubMethod(t, db.generalOfficial, "findMany", (async () => officials) as unknown as typeof db.generalOfficial.findMany);
+        stubMethod(t, db.userMatchAssignment, "findMany", (async () => []) as typeof db.userMatchAssignment.findMany);
+        const upsertMock = mock.fn(async (_args: { create: { userId: number; role: string; nameInSpreadsheet: string } }) => ({}));
+        stubMethod(t, db.userMatchAssignment, "upsert", upsertMock as unknown as typeof db.userMatchAssignment.upsert);
+        return () => upsertMock.mock.calls
+            .map(c => c.arguments[0].create)
+            .map(c => `${c.userId}:${c.role}:${c.nameInSpreadsheet}`)
+            .sort();
+    }
+
+    test("her kişi yalnız kendi hücresini ve rolünü alır", async (t) => {
+        const written = mockDb(t,
+            [{ userId: 301, firstName: "AYHAN CEM", lastName: "AKAN" }],
+            [{ userId: 13, firstName: "Cem", lastName: "Akan" }, { userId: 655, firstName: "Aslan Cem", lastName: "Akan" }]);
+        const m = makeMatch({ hakemler: ["AYHAN CEM AKAN"], gozlemciler: ["CEM AKAN"], istatistikciler: ["ASLAN CEM AKAN"] });
+
+        await buildUserAssignments([m], [500]);
+
+        assert.deepEqual(written(), [
+            "13:gozlemci:CEM AKAN",
+            "301:hakem:AYHAN CEM AKAN",
+            "655:istatistik:ASLAN CEM AKAN",
+        ]);
+    });
+
+    test("Cem Akan maçta yokken AYHAN CEM AKAN hücresi ona yazılmaz", async (t) => {
+        const written = mockDb(t,
+            [{ userId: 301, firstName: "AYHAN CEM", lastName: "AKAN" }],
+            [{ userId: 13, firstName: "Cem", lastName: "Akan" }]);
+
+        await buildUserAssignments([makeMatch({ hakemler: ["AYHAN CEM AKAN"] })], [501]);
+
+        assert.deepEqual(written(), ["301:hakem:AYHAN CEM AKAN"]);
+    });
+
+    test("hücrenin sahibi sistemde yoksa parçası olan isme de yazılmaz", async (t) => {
+        const written = mockDb(t, [], [{ userId: 13, firstName: "Cem", lastName: "Akan" }]);
+
+        await buildUserAssignments([makeMatch({ hakemler: ["AYHAN CEM AKAN"] })], [502]);
+
+        assert.deepEqual(written(), []);
+    });
+
+    test("iki kişilik hücre ikisine de yazılır", async (t) => {
+        const written = mockDb(t, [],
+            [{ userId: 132, firstName: "Recep", lastName: "Dağdelen" }, { userId: 145, firstName: "Mert", lastName: "Kayaalplı" }]);
+
+        await buildUserAssignments([makeMatch({ masa_gorevlileri: ["RECEP DAĞDELEN- MERT KAYAALPLI"] })], [503]);
+
+        assert.deepEqual(written(), [
+            "132:masa:RECEP DAĞDELEN- MERT KAYAALPLI",
+            "145:masa:RECEP DAĞDELEN- MERT KAYAALPLI",
+        ]);
+    });
+});

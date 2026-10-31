@@ -1,5 +1,6 @@
 import { db } from "./db";
-import { nameMatches, fuzzyNameSimilarity, MatchData } from "./lib/match-parser";
+import { fuzzyNameSimilarity, MatchData } from "./lib/match-parser";
+import { resolveCellCandidates, CellResolution } from "./lib/name-match";
 import { upsertUserMatchAssignment, computeContentKey } from "./db-writer";
 import { logger } from "./logger";
 
@@ -98,8 +99,8 @@ export function detectRole(match: MatchData, personName: string): { role: string
 }
 
 /**
- * For every parsed match, run nameMatches() for all active users
- * and write user_match_assignments rows.
+ * Her maçın her personel hücresini aktif kullanıcılara çözer (önce kesin kelime
+ * kuralı, sonra bulanık kademe) ve user_match_assignments satırlarını yazar.
  *
  * matchIdMap: matchKey → parsed_matches.id (from db-writer upsert results)
  */
@@ -142,6 +143,9 @@ export async function buildUserAssignments(
     let matchesWithUnmatchedCount = 0;
     const pendingAssignments: { userId: number; matchId: number; role: string; nameInSpreadsheet: string; isNew: boolean }[] = [];
     const matchById = new Map<number, MatchData>();
+    // Aynı isim tüm dosyada defalarca geçer — hücre çözümü bir kez hesaplanır.
+    const nameCandidates = users.map(u => ({ id: u.userId, firstName: u.firstName, lastName: u.lastName }));
+    const resolutionCache = new Map<string, CellResolution>();
 
     for (let i = 0; i < matches.length; i++) {
         const match = matches[i];
@@ -164,45 +168,51 @@ export async function buildUserAssignments(
         const matchedPersonnel = new Set<string>();
         const matchedUserIds = new Set<number>();
 
-        for (const user of users) {
-            // Cache her kullanıcı için sıfırlanır — farklı kullanıcıların sonuçları karışmaz
-            const nameCache = new Map<string, string | null>();
-            let matchedPerson: string | null = null;
+        // KADEME 1 — HÜCRE bazlı kesin eşleşme (2026-11-01). Eskiden döngü kullanıcı
+        // bazlıydı ve her kullanıcı "adının kelimeleri geçen ilk hücreyi" alıyordu:
+        // "AYHAN CEM AKAN" hücresi hem Ayhan Cem Akan'a hem Cem Akan'a yazılıyordu.
+        // Artık her hücrenin sahibine `resolveCellCandidates` karar verir (tam eşleşen
+        // öne geçer, çakışan adaylar atanmaz). Kişi bir maçta birden çok hücreye
+        // uyuyorsa eskisi gibi listedeki ilk hücre (hakemler önce) geçerli.
+        for (const person of allPersonnel) {
+            let res = resolutionCache.get(person);
+            if (!res) {
+                res = resolveCellCandidates(person, nameCandidates);
+                resolutionCache.set(person, res);
+            }
+            if (res.ids.length === 0 && res.ambiguous.length === 0) continue;
 
-            for (const person of allPersonnel) {
-                let cached = nameCache.get(person);
-                if (cached === undefined) {
-                    const matches_ = nameMatches(person, user.firstName, user.lastName);
-                    cached = matches_ ? person : null;
-                    nameCache.set(person, cached);
-                }
-                if (cached) {
-                    matchedPerson = cached;
-                    break;
-                }
+            // Belirsiz hücre "eşleşmiş" sayılır ki bulanık kademe onu birine vermesin.
+            matchedPersonnel.add(person);
+            if (res.ambiguous.length > 0) {
+                logger.info("İsim belirsiz — bu adaylara atama yapılmadı", {
+                    person,
+                    userIds: res.ambiguous,
+                    matchName: match.mac_adi,
+                });
             }
 
-            if (!matchedPerson) continue;
+            for (const userId of res.ids) {
+                if (matchedUserIds.has(userId)) continue;
+                matchedUserIds.add(userId);
 
-            matchedPersonnel.add(matchedPerson);
-            matchedUserIds.add(user.userId);
+                const roleInfo = detectRole(match, person);
+                if (!roleInfo) continue;
 
-            const roleInfo = detectRole(match, matchedPerson);
-            if (!roleInfo) continue;
-
-            const ck = contentKeyByMatchId.get(matchId);
-            const isNew = ck ? !existingKeys.has(`${user.userId}:${ck}`) : true;
-            pendingAssignments.push({
-                userId: user.userId,
-                matchId,
-                role: roleInfo.role,
-                nameInSpreadsheet: roleInfo.nameInSpreadsheet,
-                isNew,
-            });
-            assignmentCount++;
+                const ck = contentKeyByMatchId.get(matchId);
+                const isNew = ck ? !existingKeys.has(`${userId}:${ck}`) : true;
+                pendingAssignments.push({
+                    userId,
+                    matchId,
+                    role: roleInfo.role,
+                    nameInSpreadsheet: roleInfo.nameInSpreadsheet,
+                    isNew,
+                });
+                assignmentCount++;
+            }
         }
 
-        // Hızlı yol (nameMatches) hiç kimseyle eşleşmeyen personel için ikinci kademe:
+        // Kesin kural hiç kimseyle eşleşmeyen personel için ikinci kademe:
         // squash edilmiş benzerlik oranı (bkz. match-parser.ts fuzzyNameSimilarity).
         // Bu maçta zaten exact-match ile atanmış kullanıcılar aday havuzundan çıkarılır
         // (aynı kullanıcının aynı maçta iki isme birden atanmasını önlemek için).
