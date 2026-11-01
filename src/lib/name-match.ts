@@ -18,8 +18,14 @@
 //   - Bir hücreye birden çok kişi uyuyorsa `resolveCellCandidates` karar verir:
 //     tam eşleşen tek kişi varsa yalnız o; aynı kelimeler üzerinde çakışan adaylar
 //     belirsizdir ve hiçbiri atanmaz (yanlış kişiye maç yazmaktansa yazmamak).
+//   - Profil hücreden UZUNSA (2026-11-01, İSİM-2): "GÖNÜL BAKIR" ↔ "Gönül / Bakır Tükel",
+//     "MERİÇ ÇAKIR" ↔ "Hüseyin Meriç / Çakır". Profilde TEK fazla kelimeye izin var —
+//     sadece ikinci soyadı (soyadın son kelimesi) ya da ilk ön ad; kalan her kelime
+//     harfi harfine tutmalı, hücrede artan kelime olmamalı → "short". Bu en zayıf
+//     sonuçtur: hücreye tam/kısmi eşleşen biri varsa elenir, birden çok "short" aday
+//     varsa hiçbiri atanmaz ("CEM AKAN" Cem Akan'ındır; o yoksa Ayhan/Aslan arasında belirsiz).
 
-export type CellMatchKind = "exact" | "partial";
+export type CellMatchKind = "exact" | "partial" | "short";
 
 export interface CellMatch {
     kind: CellMatchKind;
@@ -106,8 +112,10 @@ export function matchCellName(cellName: string, firstName: string, lastName: str
         return true;
     };
 
-    for (const part of lastParts) if (!take(part, 5)) return null;
-    for (const part of firstParts) if (!take(part, 3)) return null;
+    let allTaken = true;
+    for (const part of lastParts) if (!take(part, 5)) { allTaken = false; break; }
+    if (allTaken) for (const part of firstParts) if (!take(part, 3)) { allTaken = false; break; }
+    if (!allTaken) return matchShortCell(words, firstParts, lastParts);
 
     const covered = [...used].sort((a, b) => a - b);
     const leftover = words.length - used.size;
@@ -119,9 +127,34 @@ export function matchCellName(cellName: string, firstName: string, lastName: str
     return { kind: "partial", covered, typo: false };
 }
 
-/** Eski imza: hücre bu profile uyuyor mu (tek kişi bakışı). */
+// Profil hücreden bir kelime uzun mu: ilk ön ad ya da son soyad kelimesi düşülünce
+// kalan parçalar hücrenin TÜM kelimelerini birebir (yazım hatasız) karşılıyor mu.
+function matchShortCell(words: string[], firstParts: string[], lastParts: string[]): CellMatch | null {
+    if (words.length < 2) return null;
+    const tries: string[][] = [];
+    if (lastParts.length >= 2) tries.push([...firstParts, ...lastParts.slice(0, -1)]);
+    if (firstParts.length >= 2) tries.push([...firstParts.slice(1), ...lastParts]);
+    for (const parts of tries) {
+        if (parts.length !== words.length) continue;
+        const used = new Set<number>();
+        const ok = parts.every(part => {
+            const idx = words.findIndex((w, i) => !used.has(i) && w === part);
+            if (idx === -1) return false;
+            used.add(idx);
+            return true;
+        });
+        if (ok) return { kind: "short", covered: [...used].sort((a, b) => a - b), typo: false };
+    }
+    return null;
+}
+
+/**
+ * Eski imza: hücre bu profile uyuyor mu (tek kişi bakışı). "short" sayılmaz —
+ * o sonuç ancak diğer adaylarla birlikte (`resolveCellCandidates`) karar verilebilir.
+ */
 export function cellNameMatches(cellName: string, firstName: string, lastName: string): boolean {
-    return matchCellName(cellName, firstName, lastName) !== null;
+    const m = matchCellName(cellName, firstName, lastName);
+    return m !== null && m.kind !== "short";
 }
 
 export interface NameCandidate {
@@ -146,11 +179,14 @@ export interface CellResolution {
  *     hesap (canlıda "RIFAT BAYAR" iki hesap) eskisi gibi HEPSİ atanır — bu kural
  *     onları ayırt edemez, düşürmek mevcut atamaları iptal ettirirdi. Hepsi yazım
  *     hatalıysa kimse atanmaz.
- *  2) Tam eşleşen yoksa kısmi adaylardan kelimeleri başka bir adayla çakışanlar
+ *  2) Tam eşleşen yoksa kısmi ("partial") adaylardan kelimeleri başka bir adayla çakışanlar
  *     belirsizdir, atanmaz; çakışmayanlar (iki kişilik hücre) atanır.
+ *  3) Sadece "short" (profil bir kelime uzun) adaylar kaldıysa: tek kişi ise o
+ *     atanır, birden çoksa hiçbiri (belirsiz).
  */
-// Aynı kişinin iki profilinden hangisinin sonucu sayılır: exact > exact(yazım hatalı) > partial.
+// Aynı kişinin iki profilinden hangisinin sonucu sayılır: exact > exact(yazım hatalı) > partial > short.
 function rank(m: CellMatch): number {
+    if (m.kind === "short") return -1;
     if (m.kind === "partial") return 0;
     return m.typo ? 1 : 2;
 }
@@ -175,7 +211,11 @@ export function resolveCellCandidates(cellName: string, candidates: NameCandidat
         return { ids: [], ambiguous: exact.map(([id]) => id) };
     }
 
-    const partial = [...best.entries()];
+    const partial = [...best.entries()].filter(([, m]) => m.kind === "partial");
+    if (partial.length === 0) {
+        const short = [...best.keys()];
+        return short.length === 1 ? { ids: short, ambiguous: [] } : { ids: [], ambiguous: short };
+    }
     const ids: number[] = [];
     const ambiguous: number[] = [];
     for (const [id, m] of partial) {

@@ -13,6 +13,9 @@ const RECEP = { id: 132, firstName: "Recep", lastName: "Dağdelen" };
 const MERT = { id: 145, firstName: "Mert", lastName: "Kayaalplı" };
 const CEVIK = { id: 234, firstName: "Ahmet", lastName: "Çevik" };
 const CELIK = { id: 999, firstName: "Ahmet", lastName: "Çelik" };
+// İSİM-2 (2026-11-01): profil hücreden bir kelime uzun — ikinci soyad / ilk ön ad.
+const GONUL = { id: 411, firstName: "GÖNÜL", lastName: "BAKIR TÜKEL" };
+const MERIC = { id: 268, firstName: "HÜSEYİN MERİÇ", lastName: "ÇAKIR" };
 
 describe("matchCellName", () => {
     it("birebir ad → exact", () => {
@@ -31,8 +34,23 @@ describe("matchCellName", () => {
         assert.equal(matchCellName("AYHAN CEM AKAN", "Cem", "Akan"), null);
         assert.equal(matchCellName("ASLAN CEM AKAN", "Cem", "Akan"), null);
     });
-    it("profil hücreden uzunsa → eşleşmez (eski davranış)", () => {
-        assert.equal(matchCellName("CEM AKAN", "Ayhan Cem", "Akan"), null);
+    it("profil bir kelime uzun (ilk ön ad / ikinci soyad) → short", () => {
+        assert.equal(matchCellName("CEM AKAN", "Ayhan Cem", "Akan")?.kind, "short");
+        assert.equal(matchCellName("GÖNÜL BAKIR", "GÖNÜL", "BAKIR TÜKEL")?.kind, "short");
+        assert.equal(matchCellName("MERİÇ ÇAKIR", "HÜSEYİN MERİÇ", "ÇAKIR")?.kind, "short");
+        assert.equal(cellNameMatches("GÖNÜL BAKIR", "GÖNÜL", "BAKIR TÜKEL"), false);
+    });
+    it("profil uzun ama kural dışı → eşleşmez", () => {
+        // orta kelime (son ön ad) eksik
+        assert.equal(matchCellName("AHMET ÇELİK", "Ahmet Tarık", "Çelik"), null);
+        // ilk soyad eksik
+        assert.equal(matchCellName("GÖNÜL TÜKEL", "GÖNÜL", "BAKIR TÜKEL"), null);
+        // eksik + yazım hatası
+        assert.equal(matchCellName("MERİÇ ÇAKIT", "HÜSEYİN MERİÇ", "ÇAKIR"), null);
+        // iki kelime eksik
+        assert.equal(matchCellName("MERİÇ ÇAKIR", "Ali Hüseyin Meriç", "Çakır"), null);
+        // tek kelimelik hücre
+        assert.equal(matchCellName("ÇAKIR", "MERİÇ", "ÇAKIR"), null);
     });
     it("iki kişilik hücre → partial", () => {
         assert.equal(matchCellName("RECEP DAĞDELEN- MERT KAYAALPLI", "Recep", "Dağdelen")?.kind, "partial");
@@ -52,7 +70,7 @@ describe("matchCellName", () => {
 });
 
 describe("resolveCellCandidates", () => {
-    const all = [CEM, AYHAN, ASLAN, RECEP, MERT, CEVIK, CELIK];
+    const all = [CEM, AYHAN, ASLAN, RECEP, MERT, CEVIK, CELIK, GONUL, MERIC];
 
     it("her hücre yalnız kendi sahibine gider", () => {
         assert.deepEqual(resolveCellCandidates("AYHAN CEM AKAN", all).ids, [301]);
@@ -72,6 +90,16 @@ describe("resolveCellCandidates", () => {
     it("aynı kişinin iki profili tek aday sayılır, en iyi sonuç geçerli", () => {
         const dual = [{ id: 7, firstName: "Gönül Bakır", lastName: "Tükel" }, { id: 7, firstName: "Gönül", lastName: "Bakır" }];
         assert.deepEqual(resolveCellCandidates("GÖNÜL BAKIR", dual).ids, [7]);
+    });
+    it("profil bir kelime uzun, tek aday → atanır (İSİM-2)", () => {
+        assert.deepEqual(resolveCellCandidates("GÖNÜL BAKIR", all), { ids: [411], ambiguous: [] });
+        assert.deepEqual(resolveCellCandidates("MERİÇ ÇAKIR", all), { ids: [268], ambiguous: [] });
+    });
+    it("tam eşleşen varsa short aday elenir", () => {
+        assert.deepEqual(resolveCellCandidates("CEM AKAN", all), { ids: [13], ambiguous: [] });
+    });
+    it("birden çok short aday → kimse atanmaz", () => {
+        assert.deepEqual(resolveCellCandidates("CEM AKAN", [AYHAN, ASLAN]), { ids: [], ambiguous: [301, 655] });
     });
     it("kimse uymuyorsa boş", () => {
         assert.deepEqual(resolveCellCandidates("ZEYNEP YILDIZ", all), { ids: [], ambiguous: [] });
