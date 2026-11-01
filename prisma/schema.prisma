@@ -515,6 +515,7 @@ model Video {
   category        String?
   duration        Int
   viewCount       Int             @default(0)
+  audience        String          @default("ALL")
   videoCategory   VideoCategory?  @relation(fields: [videoCategoryId], references: [id], onDelete: SetNull)
   videoCategoryId Int?
   progress        VideoProgress[]
@@ -522,6 +523,7 @@ model Video {
   updatedAt       DateTime        @updatedAt
 
   @@index([videoCategoryId])
+  @@index([audience])
   @@map("videos")
 }
 

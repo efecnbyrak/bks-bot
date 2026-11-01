@@ -367,6 +367,7 @@ açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
   (`MISSING_ROW_MAX_RATIO`, sekme okunamamış olabilir) hiçbir şey yapılmaz, uyarı loglanır.
   `cancelReason = "Dosyadan kaldırıldı"`. Satır dosyaya geri gelirse `upsertParsedMatches` iptali açar.
   Web aynı durumu `updatedAt` ile ayrıca süzer (`lib/matches/assigned-filter.ts`).
+- **Hücre ↔ profil isim kuralı `src/lib/name-match.ts` (2026-11-01, web `lib/name-match.ts`'in ikizi, aynı fixture'lı `name-match.test.ts`)**: hücrede profilin karşılamadığı TEK kelime kalırsa eşleşmez ("AYHAN CEM AKAN" ≠ "Cem Akan"); belirsiz hücre kimseye atanmaz. Biri değişirse diğeri aynı turda.
 - İsim karşılaştırması **her iki yönde de** `nameMatches()` (fuzzy, sıra-bağımsız) kullanır —
   atama tarafıyla (`user-matcher.ts`) simetrik olmalı. Ham `trim().toLowerCase()` eşitliği
   tek başına yeterli değildir (Excel'de isim sırası tutarsız).
