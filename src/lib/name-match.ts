@@ -149,12 +149,13 @@ function matchShortCell(words: string[], firstParts: string[], lastParts: string
 }
 
 /**
- * Eski imza: hücre bu profile uyuyor mu (tek kişi bakışı). "short" sayılmaz —
- * o sonuç ancak diğer adaylarla birlikte (`resolveCellCandidates`) karar verilebilir.
+ * Eski imza: hücre bu profile uyuyor mu (tek kişi bakışı). Atamayı KİMİN alacağına
+ * burada değil `resolveCellCandidates` karar verir; bu fonksiyon zaten atanmış kişinin
+ * hücresini bulmak için (rol/ücret/seans, bot "kişi hâlâ maçta mı") — "short" da sayılır,
+ * yoksa İSİM-2 kişilerinin atanan maçında rol bulunamaz.
  */
 export function cellNameMatches(cellName: string, firstName: string, lastName: string): boolean {
-    const m = matchCellName(cellName, firstName, lastName);
-    return m !== null && m.kind !== "short";
+    return matchCellName(cellName, firstName, lastName) !== null;
 }
 
 export interface NameCandidate {

@@ -38,7 +38,7 @@ describe("matchCellName", () => {
         assert.equal(matchCellName("CEM AKAN", "Ayhan Cem", "Akan")?.kind, "short");
         assert.equal(matchCellName("GÖNÜL BAKIR", "GÖNÜL", "BAKIR TÜKEL")?.kind, "short");
         assert.equal(matchCellName("MERİÇ ÇAKIR", "HÜSEYİN MERİÇ", "ÇAKIR")?.kind, "short");
-        assert.equal(cellNameMatches("GÖNÜL BAKIR", "GÖNÜL", "BAKIR TÜKEL"), false);
+        assert.equal(cellNameMatches("GÖNÜL BAKIR", "GÖNÜL", "BAKIR TÜKEL"), true);
     });
     it("profil uzun ama kural dışı → eşleşmez", () => {
         // orta kelime (son ön ad) eksik
