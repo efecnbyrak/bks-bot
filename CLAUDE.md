@@ -1,488 +1,134 @@
 # CLAUDE.md
 
-Bu dosya, bu repoda çalışırken Claude Code'a (claude.ai/code) rehberlik eder.
-
-## Proje Özeti
-
-**BKS-BOT** — Google Sheets/Drive'dan maç verisi çeken, ayrıştırıp veritabanına yazan ve
-maç atama/iptal/değişikliklerinde ilgili kullanıcılara push bildirimi gönderen bir worker.
-GitHub Actions ile zamanlanmış olarak çalışır (web sunucusu değildir, HTTP endpoint sunmaz).
-
-## Paylaşılan Veritabanı (ÇOK ÖNEMLİ)
-
-Bu proje ile **bks-web-system** (ayrı repo, Next.js web uygulaması) aynı PostgreSQL (Supabase)
-veritabanını paylaşıyor. Bu iki proje birbirinden bağımsız geliştiriliyor ve bu geçmişte
-birden fazla kez şema/davranış uyuşmazlığına yol açtı.
-
-- **DB şemasının tek gerçek kaynağı `bks-web-system/prisma/schema.prisma`dır.**
-- Bu reponun `prisma/schema.prisma` dosyası **sadece Prisma Client üretmek (generate) içindir**.
-  **`prisma db push` bu repodan ASLA çalıştırılmaz** — `package.json`'da böyle bir script
-  bulunmamalı, biri yanlışlıkla eklerse hemen kaldırılmalı.
-- Bu repoda bir model/alan eksik veya farklıysa ve bot kodu (`src/**`) o modele/alana hiç
-  dokunmuyorsa, bu genellikle zararsız bir şema-dosyası driftidir (Prisma Client sadece o
-  alanı "görmez", DB'ye hiçbir etkisi olmaz). Ama şu ihtimalleri önce doğrula:
-  1. `grep -rn "prisma\.<modelAdi>\.\|db\.<modelAdi>\." src` ile bot kodunun o modele
-     gerçekten dokunmadığını teyit et.
-  2. Bot bir modele YAZIYORSA ve o modelde web'de olup bot şemasında olmayan bir alan varsa
-     (örn. `Announcement.source`), bot'un yazdığı satırlar o alan için DB'nin gerçek
-     Postgres-seviyesi `DEFAULT` değerini alır (Prisma `@default(...)`, `db push` ile
-     gerçek bir kolon default'u olarak DB'ye yazılır) — NULL veya hata değil.
-- Yeni bir model bu repoya EKLENMEZ (bot sadece okuma/generate amaçlı) — yeni model ihtiyacı
-  varsa önce `bks-web-system` şemasında tanımlanır, sonra buraya yansıtılır.
-
-## Dokümantasyon Nerede
-
-> Bu repoda **sadece bu `CLAUDE.md` var.** Bot'a ait ayrıntılı dokümanlar (çıkarsa)
-> merkezi olarak `bks-web-system` reposunda tutulur:
-> `E:\Yazilim\BKS\bks-web-system\docs\bot\`
->
-> Yeni bir bot dokümanı gerektiğinde oraya eklenir, bu repoya yeni `.md` konmaz.
-> (Sebep: kullanıcı 3 projeyi de `bks-web-system` üzerinden yönetiyor.)
-
-## MD Dosyalarını Güncel Tutma Kuralı (ZORUNLU)
-
-Bir görev/değişiklik tamamlandıktan sonra ilgili `.md` dosyaları **kontrol edilip
-güncel tutulmalı**. Bu kontrol tahmine değil, sistemden (kod, şema, git durumu)
-gerçekten okunan bilgiye dayanmalı:
-
-- Yapılan değişiklik bu CLAUDE.md'deki bir kuralı/varsayımı geçersiz kıldıysa veya
-  yeni bir kural gerektiriyorsa (örn. yeni bir şema senkron noktası, yeni bir
-  paylaşılan alan/model) — CLAUDE.md güncellenir.
-- Ayrıntılı bot dokümanı gerekiyorsa `bks-web-system\docs\bot\` altına eklenir.
-- Güncelleme öncesi dosyanın MEVCUT halini oku, üzerine kör yazma yapma —
-  mevcut format/üslup/madde işaretleme stiline uygun ekle.
-- Emin olunmayan bir bilgi asla md'ye yazılmaz; önce kod/şema/git okunarak
-  doğrulanır.
-
-## Sezon Alanı (`ParsedMatch.sezon`) — ZORUNLU
-
-`upsertParsedMatches`'e (`src/db-writer.ts`) `sezon` parametresi olarak **ASLA ham
-`folderKey`** ("current", "latest-season" gibi) verilmez — bu, web tarafında
-(`bks-web-system/lib/matches/season.ts`) "en güncel sezon"un alfabetik sıralamayla
-yanlış tespit edilmesine yol açan bir bug'dı (2026-09-28'de bulundu: "current" 617,
-"latest-season" 114 satır canlı DB'de doğrulandı, ~85K atama yanlışlıkla "eski sezon"
-sanılıp gizlendi). `src/orchestrator.ts` artık `getSeasonKeyForFolder(folderKey)`
-(`src/config.ts`) ile çözülen GERÇEK sezon adını ("2026-2027" gibi) kullanıyor.
-**Yeni bir `DRIVE_FOLDERS` anahtarı veya `resolveSyncFolderKeys()`'e yeni bir özel
-anahtar türü ("current"/"latest-season" gibi) eklenirse, `FOLDER_SEASON_KEYS` map'ine
-de o anahtarın gerçek sezon karşılığı eklenmeli** — aksi halde aynı bug farklı bir
-anahtarla geri gelir. Web tarafı artık `sezon` string'ine filtrelemede hiç
-güvenmiyor (takvime göre filtreliyor) ama alan hâlâ UI'da ham gösterim için
-kullanılıyor, o yüzden doğru değer yazmak önemini koruyor.
-
-## Sezon Anahtarı Admin-Ayarlanabilir (2026-09-30'da eklendi)
-
-`getCurrentSeasonKey()` (`src/config.ts`) hâlâ var (takvim tabanlı, Ağustos başlangıçlı
-fallback) ama artık doğrudan çağrılmıyor — onun yerine `resolveCurrentSeasonKey()`
-kullanılıyor. Bu fonksiyon önce web reposuyla paylaşılan `SystemSetting` tablosundan
-(`SEASON_START_DATE`/`SEASON_END_DATE`, web tarafında Süper Admin → Ayarlar'dan
-elle giriliyor) okumayı dener; ikisi de doluysa sezon etiketini oradan hesaplar,
-boş/geçersizse `getCurrentSeasonKey()`'e fail-open düşer. `resolveSyncFolderKeys()`
-içindeki iki çağrı noktası (`current` klasörü + `latest-season` beklenen anahtar
-tespiti) `resolveCurrentSeasonKey()`'e geçirildi. **Yeni bir yerde sezon anahtarı
-hesaplanacaksa `getCurrentSeasonKey()` değil `resolveCurrentSeasonKey()` kullanılmalı**
-— aksi halde admin'in elle girdiği tarih o noktada sessizce yok sayılır. Geçmiş:
-`git log` (bks-web-system `docs/bot/YAPILACAKLAR.md`).
-
-## Excel Hücresi Okuma — UTC ZORUNLU (2026-10-01)
-
-`src/lib/match-parser.ts` → `cellToString`'in `Date` dalı **UTC getter'ları** kullanır
-(`getUTCHours`, `getUTCMinutes`, `getUTCDate`, `getUTCMonth`, `getUTCFullYear`).
-ExcelJS saat/tarih hücrelerini UTC olarak saklıyor (18:00 → `1899-12-30T18:00:00Z`).
-`getHours()` yerel saat dilimini uyguluyor ve 1899 için İstanbul farkı `+01:56:56`
-olduğundan saat KAYIYORDU: saklanan `18:00` → `"19:56"`.
-
-Sonucu web tarafında görüldü: Atamalar sayfasında yanlış maç saatleri ve aynı maçın iki
-farklı saatle iki kez yazılması (177 mükerrer `GameAssignment`). **Yerel getter kullanmak
-yasak.** Web reposundaki `lib/__tests__/match-parser-saat.test.ts` bu davranışı kilitliyor.
-
-## Maç Adı Çıkarılamayan Satır YAZILMAZ (2026-10-01)
-
-Eskiden son çare olarak `macAdi = \`${category} — ${ws.name}\`` yazılıyordu. Bu, sütun
-düzeni farklı olan dosyalardan (özellikle arşiv kopyaları) çöp kayıtlar üretiyordu
-(ör. maç adı "ÖZEL LİG VE ÜNİVERSİTE (2026 - 2027) — GÜNCEL") ve bu çöp web'in Ödemeler
-sayfasına kategori olarak da sızıyordu. Artık satır atlanıyor, sayısı dosya sonunda
-`[PARSER] ... satır atlandı` olarak loglanıyor. **Bu log'daki sayı artıyorsa kaynak
-dosyanın başlıkları değişmiş demektir** — `scripts/inspect-drive-headers.ts` ile bak.
-
-## TBF/FIBA/Milli Maçları — Drive Değil, Google Sheets Kaynağı (2026-10-20'de eklendi)
-
-TBL, EuroLeague, BGL, BSL, KBSL, FIBA BCL/EuroCup, Milli Takım hazırlık maçları gibi
-federasyon/milli maçları Drive'a xlsx olarak düşmüyor — federasyon bunları doğrudan iki
-canlı Google E-Tablosunda tutuyor (kullanıcı geri bildirimi: "TBL maçım Maçlarım'da yok").
-Bot bu iki kaynağı `src/tbf-milli-sync.ts` → `runTbfMilliSync()` ile okur, `src/index.ts`'te
-Drive klasör döngüsünden SONRA, ayrı bir adım olarak çalışır:
-
-- **GÜNCEL** (`TBF_MILLI_CURRENT_SHEET_ID`) — sadece o haftanın maçlarını tutar, federasyon
-  haftalık üzerine yazıyor (arşiv DEĞİL).
-- **ARŞİV** (`TBF_MILLI_ARCHIVE_SHEET_ID`) — sezon başından bugüne kadar biriken tüm maçlar,
-  GÜNCEL'in bir önceki gününe kadar (iki kaynak arasında tarih çakışması yok, 2026-10-20'de
-  canlı doğrulandı).
-
-**Kimlik**: Bot'un kendi Drive servis hesabı sadece `drive.readonly` scope'una sahip, Sheets
-okuyamaz. Bu yüzden `src/lib/sheets-source.ts` web reposunun (`bks-web-system/lib/google-oauth.ts`)
-OAuth kimliğini YENİDEN KULLANIYOR (`GOOGLE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN` — iki
-repoda da aynı 3 değer). Sheet ID'leri secret değil (link ile görüntülemeye açık) ama CLAUDE.md
-kuralına uyup env'den okunuyor (`TBF_MILLI_CURRENT_SHEET_ID`/`TBF_MILLI_ARCHIVE_SHEET_ID`).
-
-**Parser TEKRAR YAZILMADI**: `sheets-source.ts` ham sheet satırlarını (TARİH/SAAT sütunları
-sayısal seri/kesirden `"DD.MM.YYYY"`/`"HH:MM"` string'ine çevrilmiş olarak) bellekte tek
-sayfalı bir ExcelJS workbook'a yükler, `tbf-milli-sync.ts` bunu mevcut `parseWorkbook`
-(`src/lib/match-parser.ts`) ile ayrıştırır — sütun eşleme/HAKEM-MASA-GÖZLEMCİ alias mantığı
-iki kaynakta (Drive xlsx + bu sheet) birebir aynı kalır. `ligTuru` için de ek kod YOK:
-`parseFileMetadata` dosya adında (burada sheet başlığı) "TBF"/"FIBA"/"MİLLİ" görünce zaten
-`"TBF / MİLLİ"` veriyor, sheet başlıkları ("TBF-FIBA-MİLLİ MAÇLAR ...") bunu doğal tetikler.
-
-**`kategori` alanı KATEGORİ sütunundan HAM olarak geliyor** (BGL/BSL/TBL/EUROLEAGUE/FIBA BCL/
-FIBA EUROCUP/KBSL/TB2L/TKBL vb., sheet'te yazan ne ise) — kullanıcı talebi "orda yazan
-kategori neyse sisteme onu alacaksın" (2026-10-20). Web tarafında bks-web-system'daki
-dinamik `kategoriler[]` ödeme akışı (`lib/matches/fee.ts`) bunu otomatik yakalıyor, ek bir
-sabit tarife alanı/kartı gerekmedi.
-
-**Bu kaynak Drive-dosya değişim tespitine (`detectChanges`) GİRMİYOR** — kendi değişim
-tespiti var (HIZ-2, 2026-10-31): her sync'te iki sheet yine okunur ama sekmenin parmak izi
-(`src/lib/tbf-milli-fingerprint.ts` → `computeTabFingerprint` = sha256(sürüm + sezon anahtarı +
-sezon kesimi + başlıklar + ham satırlar)) `DriveFile.lastProcessedMd5`'teki (sahte dosya
-`sheet:<id>`) son başarılı izle aynıysa parse/atama/iptal taraması ATLANIR (eskiden her
-çalışma ~120 sn, 518 atama yeniden kuruluyordu). İz SADECE işlem hatasız bitince yazılır
-(`markDriveFileFingerprint`); `upsertDriveFile` başta kolonu null'a çektiği için yarıda kalan
-çalışma bir sonrakinde tam işlenir. İz okunamazsa tam işleme (eski davranış). `archive-full`
-modu veya `FORCE_SYNC=true` atlamayı kapatır. Parse/atama mantığı değişirse
-`TBF_MILLI_FINGERPRINT_VERSION` artırılır (yoksa değişmeyen sheet yeni kuralla işlenmez).
-Drive dosyalarındaki gibi, sonradan kaydolan bir kullanıcı ancak sheet değişince eşleşir. `upsertDriveFile`'a sahte bir dosya kaydı (`id: "sheet:<spreadsheetId>"`) veriliyor ki
-`ParsedMatch.driveFileId` ilişkisi ve `detectAndMarkCancelledMatches` aynı mekanizmayı
-kullanabilsin. Kilit/asgari-aralık kendi sözde klasör anahtarıyla (`"tbf-milli-sheets"`) çalışır,
-diğer klasörlerden bağımsızdır.
-
-**Teşhis**: `scripts/dry-run-tbf-milli.ts` (SALT OKUMA) iki sheet'i okuyup parse sonucunu
-basar, DB'ye yazmaz — sheet başlıkları değişirse (sütun sırası/adı) önce bununla kontrol et.
-
-## Senkron Sıklığı ve Anlık Push (2026-10-26)
-
-Hedef: maç ataması push'u değişiklikten ~1-3 dk içinde telefonda (ücretsiz kalarak — repo
-PUBLIC, GitHub Actions dakikası sınırsız; Supabase'in compute-saat limiti yok).
-- cron-job.org `repository_dispatch` tetikleyicisi **1 dakikada bir** (panelden ayarlanır).
-- `orchestrator.ts` → `MIN_SYNC_INTERVAL_SEC = 50`: eski rastgele [5,10) dk jitter KALDIRILDI;
-  bu sınır yalnızca art arda gelen iki tetiklemenin aynı işi iki kez yapmasını önler.
-- `sync-current.yml` → `concurrency: { group: sync-current, cancel-in-progress: false }`:
-  çalışma sürerken gelen tetikleme sıraya girer (en fazla 1 bekleyen), üst üste binme yok.
-- `push-sender.ts`: `android.priority: "high"` + APNs `apns-priority: 10` /
-  `apns-push-type: alert` açıkça yazılı (web `lib/push-notifications.ts` ile aynı).
-Alt sınır GitHub runner açılışı + `npm ci`/build (~40 sn - 3 dk); daha hızlısı ücretli/
-sürekli açık bir sunucu gerektirir.
-
-## Aktif Sezonun ARŞİV Kopyası Atlanır (2026-10-01)
-
-Federasyon, içinde bulunduğumuz sezonun bir "ARŞİV ..." kopyasını da arşiv klasöründe
-tutuyor. Canlı dosya güncel klasörde zaten var; arşiv kopyası elle başlatılan
-`SYNC_MODE=archive-full` turunda çekilince aynı maçlar ikinci kez yazılıyor ve o kopyanın
-sütun düzeni farklı olduğu için ayrıştırılamayan satırlar üretiyordu.
-
-`src/orchestrator.ts` dosya döngüsünde: dosya adı `/AR[ŞS]İ?V/i` ile eşleşiyor **ve** o
-klasörün sezon anahtarı `resolveCurrentSeasonKey()` ile aynıysa dosya atlanır + loglanır.
-Geçmiş sezonların arşivleri etkilenmez (onlar zaten sezon kesim filtresinden düşüyor).
-
-## Sütun Başlığı Eşlemesi — Tanınmayan Başlık = Sessiz Veri Kaybı (2026-09-30)
-
-`src/lib/match-parser.ts` sütunları BAŞLIK METNİNE göre eşliyor (`colMap`). Bir başlık
-tanınmazsa o sütunun verisi sessizce kaybolur. Gerçek bir örnek: Yerel Lig haftalık
-dosyalarında kategori sütununun başlığı `KATEGORİ` (ör. "U16EA"), Özel Lig dosyalarında
-`ORGANİZASYON`. Alias sadece `organizasyon`/`org` olduğu için `KATEGORİ` tanınmıyor ve
-`rowKategori` SEKME ADINA ("1 hafta") düşüyordu — DB'deki 808 Yerel Lig maçının tamamı
-böyle yazılmıştı. Ayrı bir `GRUP` sütunu ("A GRUBU") da tamamen kayboluyordu.
-
-Artık `kategori` ve `grup` başlıkları tanınıyor; `grup` ayrı bir alan (`MatchData.grup` →
-`ParsedMatch.grup`).
-
-**Özel Lig alt kategorisi (2026-10-28):** Özel Lig dosyasında ORGANİZASYON (ör. "4. KAMU
-OYUNLARI GSİM") ile ayrı bir KATEGORİ (ör. "BE-BK") sütunu birlikte var. Eskiden ikisi tek
-kovaya düşüyor, KATEGORİ kayboluyordu. Artık ORGANİZASYON sütunu varsa `kategori`'ye,
-KATEGORİ `altKategori`'ye (`ParsedMatch.altKategori`) yazılır; ORGANİZASYON hücresi boşsa
-eskisi gibi sekme adına düşer (KATEGORİ'ye değil — ödeme tarifesine sahte kategori sızmasın).
-ORGANİZASYON sütunu yoksa (Yerel Lig, TBF-Milli) KATEGORİ yine `kategori`'dir. Web Atamalar
-Özel Lig zorluğunu bu iki alandan okur. Web `lib/match-parser.ts` aynı değişikliği taşır.
-
-**Yeni bir kaynak dosya formatı geldiğinde başlıkları TAHMİN ETME.** Web reposundaki
-`scripts/inspect-drive-headers.ts` (salt okuma) gerçek başlık satırını yazdırır:
-`npx tsx --env-file=.env.local scripts/inspect-drive-headers.ts "5.HAFTA"`.
-Bu dosya web reposundaki `lib/match-parser.ts` ile BİREBİR aynı olmalı — alias
-değişikliği iki repoda aynı turda yapılır.
-
-## `parseTarihDate` Yıl Sınırı (2026-09-30)
-
-Yıl 2015-2100 aralığına sınırlı ve regex `(\d{4})(?!\d)` ile tam dört haneye bağlı.
-Gerçek veride bir satırın tarihi "05.12.22025" yazılmıştı; eski regex ilk dört haneyi
-("2202") yıl sanıp kaydı 2202 yılına atıyordu. Böyle kayıtlar hem listelerde geleceğe
-düşüyor hem de web'in eski sezon temizliğinden kaçıyordu (kesim tarihinden BÜYÜK
-oldukları için). Aralık dışı yıl artık `null` döndürür.
-
-## Sezon Kesim Filtresi — Eski Maçlar Bir Daha YAZILMAZ (2026-09-30'da eklendi)
-
-Web tarafında Süper Admin → Ayarlar'dan eski sezon verisi kalıcı silinebiliyor
-(`bks-web-system/lib/matches/season-purge.ts`). Bot hiçbir tarih filtresi uygulamadığı
-için silinen bu maçlar bir sonraki senkronda geri geliyordu — özellikle
-`sync-archives-once.yml` (`SYNC_MODE=archive-full`) elle çalıştırılınca, ya da
-`current`/`latest-season` klasöründeki bir dosya değişince ve içinde eski tarihli satırlar
-olduğunda.
-
-Artık `src/orchestrator.ts`, dosyayı parse ettikten HEMEN SONRA
-`getSeasonCutoffDate()` (`src/config.ts`) ile kesim tarihinden önceki maçları listeden
-atıyor ve kaç tanesini attığını logluyor. Kesim tarihi web ile **ORTAK** ayardan
-(`SystemSetting.SEASON_START_DATE`) okunuyor; ayar yoksa takvime (Ağustos 1) fail-open
-düşülüyor. Yani "Ayarlar'daki sezon başlangıcı" iki repo için tek gerçek kaynak: web neyi
-siliyorsa bot onu bir daha yazmıyor.
-
-**Filtre bilinçli olarak orchestrator'da, `db-writer.ts` içinde DEĞİL.**
-`buildUserAssignments(matches, matchIds)` (`src/user-matcher.ts`) iki listeyi indeks
-indeks eşliyor — süzmeyi `upsertParsedMatches` içine indirmek bu hizayı bozar ve
-atamalar yanlış maçlara bağlanır. Yeni bir filtre eklenecekse aynı yere eklenmeli.
-
-`tarihDate === null` satırlar (tarihi ayrıştırılamamış) BİLEREK yazılmaya devam ediyor:
-veri kaybetmek, fazladan bir satır tutmaktan daha kötü.
-
-## `UserMatchAssignment.paidAt` — Bot ASLA Yazmaz (2026-09-30'da eklendi)
-
-Kullanıcının "bu maçın ücreti ödendi" işareti. Bot bu alana **hiç yazmaz** —
-`upsertUserMatchAssignment`'ın `update` payload'ında yok (`role`, `nameInSpreadsheet`
-sadece). Ama duplicate birleştirme yolları atama satırını SİLİYOR:
-
-- `src/db-writer.ts` → `ROW_SHIFTED` dalı
-- `src/lib/contentkey-consolidator.ts` → `MOVE` / race-dupe dalı
-
-Bu iki yerde silinen kaydın `paidAt`'i kalan kayda taşınıyor (hedefte işaret yoksa).
-Yeni bir dedupe/silme yolu eklenirse **aynı taşımayı yapmak zorunlu** — aksi halde
-kullanıcı kendi işaretini sessizce kaybeder.
-
-## Tarih Ayrıştırma (`parseTarihDate`) — Türkçe Uzun Format (2026-09-29'da eklendi)
-
-`src/db-writer.ts` → `parseTarihDate()` artık hem sayısal `DD.MM.YYYY` hem de uzun Türkçe
-format (`"20 Aralık 2025 Cumartesi"`) tanıyor. Eski regex sadece sayısal formatı tanıyordu;
-bazı kaynak dosyalar (OKUL İL VE İLÇE, ARŞİV TBF-FIBA-MİLLİ MAÇLAR, ARŞİV ÖZEL LİG VE
-ÜNİVERSİTE) tarihi uzun Türkçe formatta veriyor, bu satırlar `tarihDate: NULL` kalıyordu
-(568 satır, 2026-09-29'da tespit edildi). Web tarafı `tarihDate: null` kayıtları sezon
-filtresinde bilerek görünür bıraktığı için (`bks-web-system/lib/matches/season.ts`) bu,
-eski ve yeni sezon maçlarının ayrıştırılamayıp karışık görünmesine yol açıyordu.
-**Yeni bir kaynak dosya/ay formatı eklenirse `TURKISH_MONTHS` map'i genişletilmeli.**
-Geçmişte yazılmış NULL satırlar `scripts/backfill-turkish-tarihdate.ts` (report/apply)
-ile düzeltildi — sadece `tarihDate` alanı UPDATE edilir, hiçbir satır silinmez.
-
-## Şema Senkron Checklist'i
-
-1. `bks-web-system/prisma/schema.prisma`'da bir değişiklik yapıldığını öğrendiğinde: bu
-   reponun `prisma/schema.prisma`'sının etkilenip etkilenmediğini kontrol et. Bot kodu o
-   modele/alana dokunuyorsa, bu repo şemasını da güncelleyip `npx prisma generate` çalıştır.
-2. **Yeni bir "otomatik/sistem duyurusu" türü eklenecekse** (örn. `db.announcement.create` ile
-   yeni bir otomatik bildirim yazılacaksa — bkz. `src/db-writer.ts` `createCancellationAnnouncements`),
-   mutlaka `senderId: null` ile yaz (web tarafındaki pop-up sorguları `senderId: { not: null }`
-   filtresiyle otomatik/bot kaynaklı satırları hariç tutuyor — bu filtreyi bozmayacak şekilde
-   yaz, aksi halde bot'un ürettiği bir olay sessizce web'de kullanıcıya "Yeni Duyuru" pop-up'ı
-   olarak çıkabilir).
-3. Push bildirim payload şekli (`type`, `screen`, `channel`, `data` alanları — bkz.
-   `src/lib/push-sender.ts`) değiştiğinde, hem `bks-web-system` hem mobil tarafı
-   (`bks-mobile-flutter/lib/services/push_notification_service.dart`, `badge_service.dart`)
-   aynı değişiklik döngüsünde gözden geçirilmeli. Mevcut maç bildirim tipleri:
-   `MATCH_ASSIGNED`, `MATCH_CHANGED`, `MATCH_CANCELLED`, `MATCH_UPDATED` (hepsi
-   `screen: "MATCHES"`). Yeni bir tip eklenirse `badge_service.dart` `bumpFromPushType`
-   switch'ine de eklenmeli.
-   **Geçmiş maça bildirim YOK (2026-10-26, kullanıcı kararı):** başlama anı İstanbul saatiyle
-   geçmiş maç için iptal/güncellendi/değişti/yeni atama push'u gitmez. Tek kaynak
-   `src/lib/match-time.ts` → `isMatchStarted(tarih, saat, now)` (saat yoksa gün sonu).
-   `decideAssignmentOutcomes` başlamış maçta CANCELLED yerine `EXPIRED_WINDOW` verir (atama
-   silinmez), `planNotifications` → `filterFutureEvents` olayları plana girmeden süzer.
-   Eskiden kontrol UTC GÜN bazlıydı — aynı gün oynanmış veya TRT gece yarısından sonra
-   arşive taşınan maç "İptal" push'u alıyordu.
-   **Teyit kuyruğu + yeni metinler (2026-10-31, kullanıcı kararı):** "Atama" anında gider;
-   İptal / Güncellendi / Değişiklik `match_notification_outbox`'a yazılıp
-   `NOTIFY_CONFIRM_DELAY_MIN` (varsayılan 10) dk bekler, `src/notification-outbox.ts` →
-   `flushDueNotifications` (her turun sonunda, `index.ts`) durumu DB'den yeniden kontrol edip
-   gönderir ya da düşürür (`resolvePending`, saf + testli). Sebep: federasyon E-Tabloyu canlı
-   düzenlerken yarım hâl sahte iptal üretiyordu (26 Ekim'den sonraki 39 iptalin 17'si; 29 Ekim
-   20:09'da 15 kişiye iptal, 20:17'de aynı kişilere "Yeni Maça Atandınız"). "Maç İadesi"
-   duyurusu da teyitten SONRA yazılır. Bekleyen iptal, aynı kişinin bu turdaki yeni atamasıyla
-   `planWithPending` içinde eşleşir (aynı maç → sessiz düşer; aynı gün başka maç → Değişiklik).
-   Kural seti (`src/change-notifier.ts`, saf): kişi başına HER maç ayrı bildirim (eskiden sadece
-   ilk olay); aynı takımlar + lig türü yeni tarih/saatle → Güncellendi; aynı GÜN başka maç →
-   Değişiklik; farklı gün → ayrı İptal + Atama. Güncellendi satırları `src/lib/squad-change.ts`
-   → `diffMatch`: sadece "A yerine B" (aynı rol grubunda çıkan+giren), hakem koltuk değişimi,
-   tarih/saat/salon değişimi; boş yere ekleme (ilk dolum) ve yerine kimse yazılmadan çıkarma
-   bildirim ÜRETMEZ; maçta kalan herkese gider. Başlık/metin `src/lib/notification-text.ts`
-   (başlıkta takım adı yok, gövdede maçın tüm bilgisi + görevliler alt alta; masa koltuk
-   adları web `lib/matches/official-roles.ts` → `seatLabels` ile SYNC). **Koltuk adı (Baş
-   Hakem, Sayı Görevlisi…) sadece grup TAM doluyken yazılır** (`isGroupFull`): ayrıştırıcı boş
-   hücreleri attığı için Baş Hakem boş + Yardımcı dolu olunca Yardımcı listenin başına kayıyor;
-   eksik grupta genel ad ("Hakem", "Masa Görevlisi") yazılır, hakem koltuk değişimi satırı da
-   üretilmez. Ayrıştırıcıda boşluk korunmadı — matchKey hakem/masa listesini hash'liyor. Push'u
-   `push-sender.ts` → `sendMatchPush` atar. `messaging/invalid-argument` artık ölü token
-   SAYILMAZ (payload hatasında sağlam token'lar siliniyordu; web ikizi de değişti).
-   `match_notification_outbox`'a SADECE bu repo yazar; şema web reposunda.
-   **Büyütülebilir bildirim (2026-10-31):** Firebase'in Android'de kendi çizdiği klasik
-   bildirim uzun metni büyütmüyor. `push-sender.ts` → `supportsDataOnly(platform, appVersion)`
-   1.0.12+ Android token'lara `notification` bloğu OLMAYAN mesaj gönderir (`data.title` /
-   `data.body` / `data.channel`, `android.priority: high`); mobil `showDataOnlyNotification`
-   bunu BigText ile çizer. Eski sürüm / iOS / sürümsüz token → klasik biçim (eski sürüm veri
-   mesajını gösteremez). Sürüm `PushToken.appVersion` (web `register-token` yazar).
-4. Periyodik olarak (örn. büyük bir özellik tamamlandığında) iki `schema.prisma` dosyası yan
-   yana açılıp model/alan/index listesi karşılaştırılmalı.
-5. **`Announcement.source` senkronu (2026-09-28):** web'in `schema.prisma`'sındaki
-   `source String @default("ADMIN")` bu repoya da eklendi, `npx prisma generate`
-   çalıştırıldı. `db.announcement.create` çağrısına (`src/db-writer.ts`) bilinçli
-   olarak `source` set edilmedi — bot'un `senderId: null` bırakıp DB default'unu
-   ("ADMIN") almaya devam etmesi, web'in bot-satırlarını ayırt etme mantığıyla
-   (`senderId: {not: null}` filtresi) tutarlı; `source` elle set edilirse bu ayrım
-   bozulabilir, önce web tarafı kontrol edilmeden değiştirilmemeli.
-
-## Bildirim Kararı — İptal / Güncelleme / Yeni Atama (ZORUNLU)
-
-Federasyon Excel'de kadroyu **kademeli** dolduruyor (önce masa → sonra gözlemci → ... →
-en son hakemler). `matchKey` personel içerdiği için her adım yeni bir `ParsedMatch` satırı
-açar; **aynı `contentKey`'e sahip birden fazla aktif satır normaldir**.
-`computeContentKey` = sha256(`contentKeyRaw`); `contentKeyRaw` web `lib/matches/match-utils.ts` →
-`contentKey` ile BİREBİR aynı string'i üretir (iç boşluk tekleştirme; 3x3 maçında `|#kaynak_satir`) —
-`test/content-key-twin.test.ts` web'deki ikiziyle aynı fixture'larla kilitler.
-
-- **İptal/güncelleme kararı asla tek bir satıra bakılarak verilmez.** Bir kullanıcının
-  maçtan çıkıp çıkmadığı, o `contentKey`'in **tüm aktif satırlarının** kadrosuna bakılarak
-  belirlenir (`decideAssignmentOutcomes`, saf fonksiyon, `src/db-writer.ts`). Kullanıcı
-  kanonik (son) satırda varsa maçtadır; eski satırdaki ataması kanonik satıra
-  taşınır (`ROW_SHIFTED`), boşalan satır `cancelReason: "Kadro güncellendi"` ile iptal edilir.
-- **Kanonik satır "en kalabalık kadro" DEĞİL, dosyanın ŞU ANKİ hâlinde fiilen bulunan
-  satırdır** (2026-10-05, destek talebi). Seçim `currentFileMatchKeys` (dosyadan hesaplanan
-  `computeMatchKey` kümesi) ile yapılır; havuzda hâlâ birden fazla satır varsa en kalabalık,
-  kişi sayısı da eşitse DAHA YENİ satır (büyük id) kazanır. Neden: federasyon bir hakemi
-  çıkarıp yerine başkasını yazdığında iki satırın kişi sayısı EŞİT kalıyor ve `reduce`'un
-  `>` karşılaştırması eşitlikte ilk satırı koruduğu için ESKİ satır kanonik sayılıyordu —
-  federasyonun yeni kadrosu iptal ediliyor, çıkarılan kişi eski satırda `KEPT` kalıyor,
-  yani iade ettiği maç ekranında durmaya devam ediyordu (27 satır etkilenmişti).
-  **`upsertParsedMatches` bunun ikinci yarısını kapatır:** dosyada matchKey'i birebir
-  bulunan iptalli bir satırın iptalini GERİ ALIR (`cancelledAt: null`) — aksi halde bir kez
-  yanlış tarafa konan iptal kalıcı olur ve `cancelledAt: null` filtreli iade taraması o
-  satırı bir daha hiç görmez. İade edilmiş satırlar bundan etkilenmez: iade sonrası kadro
-  değiştiği için o satırın matchKey'i artık dosyada bulunmaz. Regresyon testleri:
-  `test/decide-assignment-outcomes.test.ts` → "kanonik satır seçimi" bloğu.
-- **Dosyadan kalkan satırlar iptal edilir** (2026-10-25): `src/db-writer.ts` →
-  `cancelRowsMissingFromFile` (orchestrator, `detectAndMarkCancelledMatches`'ten sonra).
-  Federasyon bir maçı Excel'den silip/taşıyınca eski satır aktif kalıyor, web Atamalar
-  sayfası onu atanacak maç sanıyordu. Sadece: ataması olmayan + tarihi bugün/ileri + dosyada
-  matchKey'i yok. Kalkan sayı dosyanın gelecek aktif satırlarının yarısını geçerse
-  (`MISSING_ROW_MAX_RATIO`, sekme okunamamış olabilir) hiçbir şey yapılmaz, uyarı loglanır.
-  `cancelReason = "Dosyadan kaldırıldı"`. Satır dosyaya geri gelirse `upsertParsedMatches` iptali açar.
-  Web aynı durumu `updatedAt` ile ayrıca süzer (`lib/matches/assigned-filter.ts`).
-- **Hücre ↔ profil isim kuralı `src/lib/name-match.ts` (2026-11-01, web `lib/name-match.ts`'in ikizi, aynı fixture'lı `name-match.test.ts`)**: hücrede profilin karşılamadığı TEK kelime kalırsa eşleşmez ("AYHAN CEM AKAN" ≠ "Cem Akan"); belirsiz hücre kimseye atanmaz. Biri değişirse diğeri aynı turda.
-- İsim karşılaştırması **her iki yönde de** `nameMatches()` (fuzzy, sıra-bağımsız) kullanır —
-  atama tarafıyla (`user-matcher.ts`) simetrik olmalı. Ham `trim().toLowerCase()` eşitliği
-  tek başına yeterli değildir (Excel'de isim sırası tutarsız).
-- "Yeni atama mı" kararı `userId:matchId` değil **`userId:contentKey`** bazlıdır.
-- `detectAndMarkCancelledMatches` → `CancellationScanResult { cancelled, shifted }` döner.
-  `reconcileAndNotify` (`src/notification-outbox.ts`) bunları + `newAssignments`'i alıp
-  `planWithPending` (saf, `src/change-notifier.ts`) ile kullanıcı + maç bazında bildirim tipi
-  seçer: `UPDATED` / `CHANGED` / `CANCELLED` / `ASSIGNED` (ayrıntı: yukarıdaki "Teyit kuyruğu" notu).
-- **BUG DÜZELTİLDİ (2026-09-24, destek talebi):** `CANCELLED` kararı verilen
-  `UserMatchAssignment` satırı, karar doğru hesaplandığı hâlde hiç SİLİNMİYORDU
-  (sadece bildirim için `cancelledMap`'e ekleniyordu) — bu yüzden eski `ParsedMatch`
-  satırı asla "boş" sayılmıyor, `cancelledAt` hiç set edilmiyor, çıkarılan kişi
-  sonsuza dek eski maçı görmeye devam ediyordu. `DRY_RUN` simülasyonu bu satırları
-  zaten "yok" sayıyordu — sadece canlı moddaki asıl silme adımı unutulmuştu. Düzeltme:
-  `detectAndMarkCancelledMatches` içine, `ROW_SHIFTED` uygulamasından hemen sonra
-  ve satır-iptal sayımından ÖNCE, `CANCELLED` kararlı her atamayı silen bir adım
-  eklendi (`src/db-writer.ts`, "2.5" adımı). Regresyon testi:
-  `test/decide-assignment-outcomes.test.ts` → "gerçek vaka Ali Can Yılmaz". Bu bug
-  nedeniyle birikmiş geçmiş veri `scripts/consolidate-active-contentkey-duplicates.ts
-  apply-with-removals` ile temizlendi (geçmiş: bks-web-system
-  `git log -- docs/bot/YAPILACAKLAR.md`).
-- **`NOTIFY_DRY_RUN=1`**: FAZ 2 kararları (atama taşıma, satır iptali, push gönderimi)
-  uygulanmaz, sadece loglanır. `upsertDriveFile` / `upsertParsedMatches` normal çalışır
-  (matchId üretmeleri gerekiyor). **`buildUserAssignments`'ın (`src/user-matcher.ts`)
-  gerçek `UserMatchAssignment` yazma adımı da bu bayrakla korunuyor (2026-09-26'da
-  eklendi)** — isim eşleştirme/ambiguity kontrolü/`assignmentCount` hesabı yine tam
-  çalışır, sadece DB'ye yazılmaz. Hem `sync-current.yml` hem `sync-archives-once.yml`
-  `workflow_dispatch` → `dry_run` seçeneğiyle manuel tetiklenebilir (cron turları
-  etkilenmez). **Neden `sync-archives-once.yml`'e de eklendi:** 2026-09-26'da bu
-  workflow önizlemesiz `sync_mode: archive-full` ile elle çalıştırılıp production'a
-  53.284 satır yazmıştı (bkz. `docs/bot/YAPILACAKLAR.md` → "Kalıcı notlar").
-- **`evaluateCancellationSafety` sigortası**: bir dosyada iptal adayı ≥25 atama VE dosyanın
-  aktif atamalarının >%40'ıysa (başlık bozulması / kolon kayması şüphesi) hiçbir iptal
-  yazılmaz, `logger.error` ile loglanır. Eşiği düşürmeden önce günlük normal iade hacmini
-  (5-24 atama) kontrol et.
-- **reconcile (`detectAndMarkCancelledMatches`) sadece `filesChanged` olan dosyalarda çalışır**
-  (`src/orchestrator.ts` → `toProcess` döngüsü, dosya-bazlı). Bir Drive dosyası kadrosu
-  netleştikten sonra bir daha hiç değişmezse (donmuş dosya), o dosyanın kademeli-doldurma
-  ikizleri (aynı contentKey, birden fazla aktif satır) reconcile tarafından birleştirilmez.
-- **B6 ÇÖZÜMÜ (2026-09-09) — her sync sonunda periyodik konsolidasyon.** `src/index.ts`,
-  `reconcileAndNotify`'dan SONRA `consolidateActiveContentKeyDuplicates()`
-  (`src/lib/contentkey-consolidator.ts`) çağırır: tüm DB'yi tarar, aynı contentKey'e sahip
-  >1 aktif satır olan grupları GÜVENLİ birleştirir (kanonik = en dolu kadro; atama
-  kanoniğe taşınır / kardeşte varsa silinir; **belirsiz "gerçek çıkarılma" atamalarına
-  DOKUNMAZ**). BİLDİRİM ÜRETMEZ. İlk kurulumda (`isFirstEverSync`) atlanır. Hata sync'i
-  başarısız saymaz. `NOTIFY_DRY_RUN=1` ile DB'ye yazmadan çalışır. Bu, donmuş dosya
-  ikizlerinin birikmesini kalıcı olarak engeller — web `dedupeMatchesByContent`
-  (`bks-web-system/lib/matches/match-utils.ts`) ikinci savunma katmanı olarak kalır.
-  Elle çalıştırma / bir kerelik "gerçek çıkarılma" temizliği için CLI:
-  `scripts/consolidate-active-contentkey-duplicates.ts` (report / apply / apply-with-removals).
-
-## Bakım / Onarım Script'leri (`scripts/`)
-
-Tek seferlik DB düzeltme script'leri. **HEPSİ** aynı güvenlik disiplinine uyar: sadece
-`user_match_assignments` (matchId update / delete) + boşalan `parsed_matches` satırına
-`cancelledAt`/`cancelReason`; kanonik satıra, uygunluk/profil/duyuru tablolarına DOKUNMAZ;
-`userId_matchId` unique guard çift atama üretmeyi imkânsız kılar; her `apply` geri alma
-logu (JSON) basar. Önce `report` ile sayıyı doğrula, kullanıcı onayıyla `apply`.
-
-| Script | Hedef | cancelReason |
-|---|---|---|
-| `repair-false-cancellations.ts` | A1 — `cancelledAt` DOLU eski satır + aktif kardeş (kademeli doldurma sahte iptali) | `Hakem listesinden çıkarıldı` (korunur) |
-
-> **A1 `apply` çalıştırıldı (2026-09-10).** `report` = 50/255; `apply` = 255 atama, hepsi
-> `DELETED (dupe)` (report↔apply arası bot sync'i atamaları zaten kanoniğe taşımıştı, `apply`
-> iptal satırlarındaki kopyaları temizledi). Doğrulama: iptal olmuş kanonik 0, kanonikte
-> aktif atama 309, ikinci `report` = 0 (idempotent). Geri alma logu:
-> `E:\tmp\A1-undo-20260910T175411.json`. Geçmiş: bks-web-system `git log -- docs/web/YAPILACAKLAR.md`
-> (2026-09-10, A1).
-| `detect-key-mismatch-duplicates.ts` | Salt okuma — isim/tarih değişimi kaynaklı farklı-contentKey ikizi | — |
-| `repair-key-mismatch-duplicates.ts` | Farklı contentKey (placeholder isim → gerçek isim) stale satır. `apply` / `apply-with-removals` (belirsiz = gerçek kadro değişimi de siler) | `Anahtar uyuşmazlığı (isim/tarih değişimi) — otomatik onarım` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
-| `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey, birden fazla AKTİF satır (donmuş dosya ikizi). Asıl mantık `src/lib/contentkey-consolidator.ts`'te (bot her sync sonunda otomatik çalıştırır — B6). Bu CLI sarmalayıcı: `report` / `apply` / `apply-with-removals` | `Aynı maçın mükerrer aktif kaydı — otomatik birleştirme` / `Güncel kadroda yok — mükerrer stale kayıt temizliği` |
-| `repair-salon-rename-duplicates.ts` | Salon adı varyasyonu (`PAIRS` dizisinde elle enumerate edilmiş çiftler) | `Salon adı varyasyonu — mükerrer stale kayıt temizliği` |
-| `backfill-contentkey-v2.ts` | contentKey formülü değişince (2026-10-28: iç boşluk tekleştirme + 3x3'te `|#kaynakSatir`) mevcut hash'leri yeniler. `report` (varsayılan, salt okuma: değişen satır, bölünen/birleşen aktif grup) / `apply` (sadece `contentKey` yazar) | — |
-| `backfill-turkish-tarihdate.ts` | `tarihDate: NULL` satırlar (uzun Türkçe tarih formatı parse edilemediği için, bkz. yukarıdaki "Tarih Ayrıştırma" bölümü). Sadece `tarihDate` UPDATE edilir, satır silinmez/iptal edilmez | — (cancelReason yok, sadece tarih dolduruluyor) |
-
-Yeni bir mükerrer deseni çıkarsa: önce hangi alanın `contentKey`'i değiştirdiğini tespit et
-(mac_adi / tarih / saat / salon), sonra ilgili script'i genişlet veya yeni bir hedefli
-script yaz — **genel bir "slot bazlı hepsini birleştir" yaklaşımından kaçın** (aynı salonda
-peş peşe maç yöneten ekipler yüksek kadro örtüşmesi üretir, yanlış pozitif riski yüksek).
-
-## Ceza Sorgulama Tabloları — Bot ASLA Dokunmaz (2026-10-03'te eklendi)
-
-Web tarafında Saha Komiserlerine özel bir **Ceza Sorgulama** sayfası var. Verisi iki
-Google E-Tablo'dan geliyor: *CEZA KARARLARI* ve *ANTRENÖR OLMADAN SAHAYA ÇIKAN TAKIMLAR*.
-Üç yeni tablo kullanılıyor: `DisciplinaryRecord`, `CoachlessTeamRecord`,
-`DisciplinarySyncState` (şemada var çünkü şema tek kaynak web'de).
-
-**Bu üç tabloya BKS-BOT ASLA YAZMAZ ve okumaz.** Senkronu web tarafı yapıyor
-(`app/api/cron/sync-discipline` → `lib/discipline/sync.ts`, saatlik).
-
-**Neden bot değil de web** (gelecekte "bunu bot yapsa daha mantıklı değil mi?" sorusu
-çıkarsa cevabı burada): bot'un Google kimliği bir **servis hesabı** ve scope'u yalnızca
-`drive.readonly` (`src/lib/google-drive.ts`) — Sheets API'yi hiç kullanmıyor, repoda
-`spreadsheets.values.get` çağrısı yok. Web'in OAuth hattı ise `spreadsheets` scope'una
-sahip ve 2026-10-03'te iki dosyayı da okuyabildiği **canlı olarak doğrulandı**. Veri çok
-küçük (56 + 12 satır), bot'un ağır Drive/xlsx hattına taşımanın bir faydası yok; taşımak
-yeni scope, yeni entry point ve yeni bir dış tetikleyici kurulumu demek olurdu.
-
-**Yani:** bu özellik için bu repoda yapılacak hiçbir iş yok. Şema değişikliği de
-gerekmiyor — bot kodu bu modellere hiç referans vermiyor (checklist adım 1'in testi:
-`grep "prisma.disciplinary"` → 0 sonuç).
-
-## Git Push Kuralları
-
-- Push öncesi kullanıcıya kısa bir onay sorusu sor.
-- Force push / history rewrite kesinlikle yasak.
-- Commit mesajlarına AI imzası eklemek konusunda kullanıcıya sor — `bks-web-system` reposunda
-  bu açıkça yasaklı (proje kuralı), bu repoda aksi belirtilmediği sürece aynı kural geçerli
-  sayılmalı.
-
-## Kaynak Satır Bilgisi (`ParsedMatch.kaynakSekme` / `kaynakSatir`, 2026-10-24)
-
-`parseWorkbook` her maça sekme adını (`kaynak_sekme`) ve Excel'deki GERÇEK satır
-numarasını (`kaynak_satir`, `row.number` — boş satırlar atlandığı için dizi indeksi
-DEĞİL) yazar; `upsertParsedMatches` bunları create + update payload'ında taşır. Web
-Atamalar tablosu varsayılan olarak bu sırayla gösterilir. Şema değişikliği web
-reposunda yapılır (`db:push` ASLA buradan çalıştırılmaz).
+**BKS-BOT** — Google Drive/Sheets'ten maç verisi çeker, ayrıştırıp DB'ye yazar, atama/iptal/değişiklikte push gönderir.
+GitHub Actions ile zamanlanmış çalışır (HTTP ucu yok). Ayrıntı ve tarihçe: git geçmişi + bks-web-system `docs/bot/`.
+
+## 1. Temel Kurallar
+
+- **Paylaşılan DB:** bks-web-system ile aynı PostgreSQL (Supabase). **Şemanın tek kaynağı `bks-web-system/prisma/schema.prisma`.**
+  Bu repodaki şema sadece `prisma generate` içindir; **`prisma db push` bu repodan ASLA çalışmaz** (package.json'a böyle script eklenmez).
+  Yeni model burada açılmaz — önce web şemasında tanımlanır, sonra yansıtılır.
+- **Şema drift'i:** eksik/farklı model zararsız olabilir — önce `grep -rn "prisma\.<model>\.\|db\.<model>\." src` ile bot kodunun ona
+  dokunmadığını doğrula. Bot bir modele yazıyor ve web'deki bir alan burada yoksa satır o alanın DB `DEFAULT`'unu alır.
+  Web şeması değişince: bot kodu o modele dokunuyorsa bu şema güncellenir + `npx prisma generate`. Büyük işlerden sonra iki şema yan yana karşılaştırılır.
+- **Dokümantasyon:** bu repoda sadece `CLAUDE.md`. Bot dokümanları `bks-web-system/docs/bot/` (YAPILACAKLAR, TEST). İş bitince md'ler
+  **koddan/şemadan okunarak** güncellenir (önce mevcut hâl okunur, emin olunmayan yazılmaz).
+- **Git:** push öncesi kısa onay sorusu; force push / history rewrite yasak; commit'e AI imzası / `Co-Authored-By` eklenmez.
+
+## 2. Bot'un Yazmadığı / Dokunmadığı Veri
+
+| Veri | Kural |
+|---|---|
+| `UserMatchAssignment.paidAt` | ASLA yazılmaz (`upsertUserMatchAssignment` update'i sadece `role`, `nameInSpreadsheet`). Atama silen dedupe yolları (`db-writer.ts` ROW_SHIFTED, `contentkey-consolidator.ts` MOVE/race-dupe) silinen kaydın `paidAt`'ini kalana taşır — **yeni silme yolu da taşımak zorunda** |
+| `ParsedMatch.seansSayisi` | ASLA yazılmaz (`db-writer.ts` açık alan listesinde yok) |
+| Ceza Sorgulama (`DisciplinaryRecord`, `CoachlessTeamRecord`, `DisciplinarySyncState`) | Ne okunur ne yazılır — senkronu web yapar (bot servis hesabı sadece `drive.readonly`) |
+| Atamalar/TBF/Derbi/Venue/ManualDifficulty/öneri tabloları, `exam_sessions`, `ObserverReportRead` | Bot kodu kullanmaz |
+| `Announcement.source` | Elle set edilmez; bot `senderId: null` bırakır, DB default'u ("ADMIN") alır. **Yeni otomatik duyuru türü `senderId: null` ile yazılır** (web pop-up'ları `senderId: { not: null }` filtreler) |
+
+**Sadece bot'un yazdıkları:** `match_notification_outbox` (şema web reposunda) · `ParsedMatch.kaynakSekme` / `kaynakSatir`
+(`row.number` — gerçek Excel satırı, dizi indeksi değil; web Atamalar sırası buna bağlı).
+
+## 3. Sezon
+
+- `upsertParsedMatches`'e `sezon` olarak **ASLA ham `folderKey`** ("current", "latest-season") verilmez — `getSeasonKeyForFolder(folderKey)`
+  (`src/config.ts`) gerçek adı ("2026-2027") verir. Yeni `DRIVE_FOLDERS` anahtarı / özel anahtar türü eklenirse `FOLDER_SEASON_KEYS`'e de eklenir.
+- Sezon anahtarı her yerde **`resolveCurrentSeasonKey()`** ile (web ile ortak `SystemSetting.SEASON_START_DATE`/`SEASON_END_DATE`, yoksa
+  Ağustos takvimi). `getCurrentSeasonKey()` sadece fallback — doğrudan çağrılmaz.
+- **Sezon kesimi:** `src/orchestrator.ts` parse'tan HEMEN SONRA `getSeasonCutoffDate()` ile kesim öncesi maçları atar (web neyi siliyorsa
+  bot geri yazmaz). **Filtre bilinçli olarak orchestrator'da**, `db-writer.ts`'te değil — `buildUserAssignments(matches, matchIds)` iki
+  listeyi indeksle eşler. Yeni filtre de aynı yere. `tarihDate === null` satırlar yazılır (veri kaybı daha kötü).
+- **Aktif sezonun ARŞİV kopyası atlanır:** dosya adı `/AR[ŞS]İ?V/i` + klasör sezonu = güncel sezon → atla + logla.
+
+## 4. Ayrıştırma (`src/lib/match-parser.ts`)
+
+- Sütunlar **başlık metniyle** (`colMap`) eşlenir; tanınmayan başlık = **sessiz veri kaybı**. Yerel Lig: `KATEGORİ` (ör. U16EA) → `kategori`;
+  Özel Lig: `ORGANİZASYON` → `kategori`, `KATEGORİ` → `altKategori` (ORGANİZASYON hücresi boşsa sekme adı, KATEGORİ değil); ayrı `GRUP` → `ParsedMatch.grup`.
+- **Yeni format geldiğinde başlık TAHMİN EDİLMEZ:** web `scripts/inspect-drive-headers.ts "5.HAFTA"` (salt okuma). Alias değişikliği web
+  `lib/match-parser.ts` ile **aynı turda**.
+- **Excel hücresinde UTC getter zorunlu** (`cellToString` → `getUTC*`); yerel getter 1899 İstanbul farkıyla (+01:56:56) saati kaydırır. Web
+  `match-parser-saat.test.ts` kilitler.
+- **Maç adı çıkarılamayan satır yazılmaz** — atlanır, `[PARSER] ... satır atlandı` loglanır. Sayı artıyorsa kaynak başlıkları değişmiştir.
+- **`parseTarihDate`** (`db-writer.ts`): `DD.MM.YYYY` + uzun Türkçe ("20 Aralık 2025 Cumartesi", `TURKISH_MONTHS`); yıl 2015–2100 ve
+  `(\d{4})(?!\d)` (aralık dışı → `null`). Yeni ay formatı → `TURKISH_MONTHS` genişler.
+- **Sayısal saat:** bot `Math.floor`, web `Math.round` (web ayrıştırmadığı için etkisiz, bilinçli).
+
+## 5. TBF/FIBA/Milli — Google Sheets Kaynağı
+
+- Drive'a düşmeyen federasyon/milli maçları iki canlı E-Tablodan: **GÜNCEL** (`TBF_MILLI_CURRENT_SHEET_ID`, haftalık üzerine yazılır) +
+  **ARŞİV** (`TBF_MILLI_ARCHIVE_SHEET_ID`, sezon başından GÜNCEL'in önceki gününe). `src/tbf-milli-sync.ts` → `runTbfMilliSync()`, Drive döngüsünden SONRA.
+- Kimlik: `src/lib/sheets-source.ts` web'in OAuth'unu kullanır (`GOOGLE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN`, iki repoda aynı).
+- **Parser yeniden yazılmadı:** satırlar bellekte ExcelJS workbook'a yüklenip `parseWorkbook` ile ayrıştırılır; `ligTuru` sheet başlığından
+  `"TBF / MİLLİ"`; `kategori` KATEGORİ sütunundan **HAM**.
+- Kendi değişim tespiti: sekme parmak izi (`tbf-milli-fingerprint.ts` → `computeTabFingerprint`) `DriveFile.lastProcessedMd5`'teki (sahte dosya
+  `sheet:<id>`) izle aynıysa parse/atama/iptal ATLANIR. İz sadece hatasız bitince yazılır (`markDriveFileFingerprint`). `archive-full` /
+  `FORCE_SYNC=true` atlamayı kapatır. **Parse/atama mantığı değişirse `TBF_MILLI_FINGERPRINT_VERSION` artırılır.** Kilit anahtarı `"tbf-milli-sheets"`.
+- Teşhis: `scripts/dry-run-tbf-milli.ts` (salt okuma).
+
+## 6. Atama ve İptal Kararı (ZORUNLU)
+
+Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için her adım yeni satır açar — **aynı `contentKey`'de birden çok aktif satır normaldir.**
+
+- **`contentKey`** = sha256(`contentKeyRaw`); `contentKeyRaw` web `lib/matches/match-utils.ts` → `contentKey` ile BİREBİR (`mac_adi|tarih|saat`,
+  iç boşluk tekleştirme, 3x3'te `|#kaynak_satir`). `test/content-key-twin.test.ts` web ikiziyle aynı fixture'lar.
+- **Karar tek satıra bakılarak verilmez** — `decideAssignmentOutcomes` (saf, `db-writer.ts`) contentKey'in **tüm aktif satırlarına** bakar.
+  Kanonik satırda olan kişi maçtadır, ataması kanoniğe taşınır (`ROW_SHIFTED`), boşalan satır `"Kadro güncellendi"` ile iptal.
+- **Kanonik satır = dosyanın ŞU ANKİ hâlinde bulunan satır** (`currentFileMatchKeys`); birden çoksa en kalabalık, eşitse daha yeni (büyük id).
+  `upsertParsedMatches` dosyada matchKey'i birebir bulunan iptalli satırın iptalini **geri alır**. Test: `decide-assignment-outcomes.test.ts` → "kanonik satır seçimi".
+- `CANCELLED` kararlı atamalar `detectAndMarkCancelledMatches` içinde (ROW_SHIFTED'dan sonra, satır-iptal sayımından önce) **silinir**.
+- **Dosyadan kalkan satırlar:** `cancelRowsMissingFromFile` — sadece ataması yok + tarihi bugün/ileri + matchKey dosyada yok. Kalkan sayı gelecek
+  aktif satırların yarısını geçerse (`MISSING_ROW_MAX_RATIO`) hiçbir şey yapılmaz. `cancelReason = "Dosyadan kaldırıldı"`; geri gelirse iptal açılır.
+- **İsim:** hücre ↔ profil `src/lib/name-match.ts` (web `lib/name-match.ts` ikizi, aynı fixture'lı `name-match.test.ts`) — profilin karşılamadığı
+  TEK kelime kalırsa eşleşmez ("AYHAN CEM AKAN" ≠ "Cem Akan"), belirsiz hücre kimseye atanmaz. Karşılaştırma iki yönde de `nameMatches()`
+  (fuzzy, sıra bağımsız; `user-matcher.ts` ile simetrik). Bulanık eşikler web `lib/name-fuzzy.ts` ile aynı (0.90 / kısa 0.95 / fark 0.05).
+- "Yeni atama mı" kararı **`userId:contentKey`** bazlı.
+- **Sigorta** `evaluateCancellationSafety`: iptal adayı ≥25 atama VE dosyanın aktif atamalarının >%40'ı → hiçbir iptal yazılmaz, `logger.error`.
+  Eşik düşürülmeden önce normal günlük iade hacmine (5–24) bakılır.
+- Reconcile sadece `filesChanged` dosyalarda çalışır; donmuş dosya ikizlerini her sync sonunda `consolidateActiveContentKeyDuplicates()`
+  (`contentkey-consolidator.ts`) güvenli birleştirir — bildirim üretmez, belirsiz "gerçek çıkarılma"ya dokunmaz, ilk kurulumda atlanır.
+
+## 7. Bildirimler
+
+- Tipler `MATCH_ASSIGNED`, `MATCH_CHANGED`, `MATCH_CANCELLED`, `MATCH_UPDATED` (`screen: "MATCHES"`). Yeni tip → mobil `badge_service.dart`
+  `bumpFromPushType`'a da. Payload (`type`, `screen`, `channel`, `data`) değişirse web + mobil aynı turda.
+- **Geçmiş maça bildirim yok:** `src/lib/match-time.ts` → `isMatchStarted(tarih, saat, now)` (İstanbul saati, saat yoksa gün sonu).
+  Başlamış maçta `decideAssignmentOutcomes` → `EXPIRED_WINDOW` (atama silinmez), `filterFutureEvents` plandan süzer.
+- **Teyit kuyruğu:** Atama anında; İptal / Güncellendi / Değişiklik `match_notification_outbox`'a yazılıp `NOTIFY_CONFIRM_DELAY_MIN` (10) dk
+  bekler, `notification-outbox.ts` → `flushDueNotifications` (her tur sonu) DB'den teyit edip gönderir/düşürür (`resolvePending`, saf).
+  "Maç İadesi" duyurusu da teyitten sonra. Bekleyen iptal aynı kişinin yeni atamasıyla `planWithPending`'de eşleşir (aynı maç → sessiz, aynı gün → Değişiklik).
+- **Kural seti** (`change-notifier.ts`, saf): kişi başına her maç ayrı; aynı takımlar + lig türü yeni tarih/saat → Güncellendi; aynı gün başka maç →
+  Değişiklik; farklı gün → İptal + Atama. Güncellendi satırları `squad-change.ts` → `diffMatch` ("A yerine B", hakem koltuk, tarih/saat/salon;
+  ilk dolum ve yerine kimse yazılmadan çıkarma bildirim üretmez; maçta kalan herkese).
+- **Metin** `notification-text.ts` (başlıkta takım yok, gövdede tüm bilgi + görevliler; masa koltuk adları web `official-roles.ts` → `seatLabels`
+  ile SYNC). Koltuk adı sadece grup TAM doluyken (`isGroupFull`), eksikse genel ad.
+- **Gönderim** `push-sender.ts` → `sendMatchPush`: `supportsDataOnly(platform, appVersion)` 1.0.12+ Android'e `notification` bloksuz veri
+  mesajı (mobil BigText çizer), diğerlerine klasik; **iki biçimin `data`'sı da `title`+`body`** (`buildPushMessages`). `android.priority: high`,
+  APNs `apns-priority: 10` / `apns-push-type: alert`. `messaging/invalid-argument` ölü token SAYILMAZ (web ikizi de).
+
+## 8. Senkron ve Güvenli Çalıştırma
+
+- cron-job.org `repository_dispatch` dakikada bir; `MIN_SYNC_INTERVAL_SEC = 50` çift işi önler; `sync-current.yml`
+  `concurrency: { group: sync-current, cancel-in-progress: false }`. Alt sınır runner açılışı (~40 sn – 3 dk).
+- **`NOTIFY_DRY_RUN=1` / workflow `dry_run`:** FAZ 2 kararları + `buildUserAssignments` yazması + push uygulanmaz, loglanır;
+  **`ParsedMatch` upsert'i gerçekten çalışır.** `sync-archives-once.yml` `archive-full` modunda önce mutlaka `dry_run: true` ile sayı görülür.
+- Testler (`npm test`, gerçek `DATABASE_URL`/`DIRECT_URL` ister). Düşük RAM'de dosya dosya:
+  `TS_NODE_TRANSPILE_ONLY=true node -r ./test/register.js --test --test-concurrency=1 test/<dosya>.test.ts` + ayrıca `npx tsc --noEmit`.
+
+## 9. Bakım / Onarım Script'leri (`scripts/`)
+
+Hepsi aynı disiplin: sadece `user_match_assignments` (update/delete) + boşalan `parsed_matches` satırına `cancelledAt`/`cancelReason`;
+kanonik satıra ve diğer tablolara dokunmaz; `userId_matchId` unique çift atamayı engeller; her `apply` geri alma logu (JSON) basar.
+**Önce `report`, kullanıcı onayıyla `apply`.**
+
+| Script | Hedef |
+|---|---|
+| `repair-false-cancellations.ts` | Sahte iptal: iptalli eski satır + aktif kardeş |
+| `detect-key-mismatch-duplicates.ts` | Salt okuma — isim/tarih değişimi kaynaklı farklı-contentKey ikizi |
+| `repair-key-mismatch-duplicates.ts` | Placeholder → gerçek isim stale satırı (`apply` / `apply-with-removals`) |
+| `consolidate-active-contentkey-duplicates.ts` | Aynı contentKey'de çok aktif satır (otomatik konsolidasyonun CLI'ı) |
+| `repair-salon-rename-duplicates.ts` | Salon adı varyasyonu (`PAIRS` elle) |
+| `backfill-contentkey-v2.ts` | contentKey formülü değişince hash'leri yeniler (`report` / `apply`, sadece `contentKey` yazar) |
+| `backfill-turkish-tarihdate.ts` | `tarihDate: NULL` satırları doldurur (sadece UPDATE) |
+| `dry-run-tbf-milli.ts` | Salt okuma — TBF-Milli sheet parse sonucu |
+
+Yeni mükerrer deseni: önce `contentKey`'i hangi alanın değiştirdiğini bul, hedefli script yaz — **"slot bazlı hepsini birleştir"den kaçın**
+(aynı salonda peş peşe maç yöneten ekipler yanlış pozitif üretir).
