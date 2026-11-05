@@ -100,8 +100,9 @@ Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için h
   ilk dolum ve yerine kimse yazılmadan çıkarma bildirim üretmez; maçta kalan herkese).
 - **Metin** `notification-text.ts` (başlıkta takım yok, gövdede tüm bilgi + görevliler; masa koltuk adları web `official-roles.ts` → `seatLabels`
   ile SYNC). Koltuk adı sadece grup TAM doluyken (`isGroupFull`), eksikse genel ad.
-- **Gönderim** `push-sender.ts` → `sendMatchPush`: `supportsDataOnly(platform, appVersion)` 1.0.12+ Android'e `notification` bloksuz veri
-  mesajı (mobil BigText çizer), diğerlerine klasik; **iki biçimin `data`'sı da `title`+`body`** (`buildPushMessages`). `android.priority: high`,
+- **Gönderim** `push-sender.ts` → `sendMatchPush`: HER cihaza klasik (`notification` bloklu) mesaj, `data` `title`+`body` taşır
+  (`buildPushMessage`). Sadece veri (data-only) biçimi 2026-11-05'te KALDIRILDI — kapalı uygulama / üretici pil kısıtlamasında
+  bildirim sessizce kayboluyordu; geri getirilmez. `android.priority: high`,
   APNs `apns-priority: 10` / `apns-push-type: alert`. `messaging/invalid-argument` ölü token SAYILMAZ (web ikizi de).
 
 ## 8. Senkron ve Güvenli Çalıştırma
