@@ -394,6 +394,42 @@ model SystemSetting {
   @@map("system_settings")
 }
 
+// 81 il çok kiracılı yapı — il yapılandırmasının TEK kaynağı (docs/COK-IL-MIMARISI.md § 2, Faz 0 2026-11-09).
+// İlin URL segmenti, TBF adresi, bot Drive klasörleri, Sheet ID'leri ve modül bayrakları burada durur; kodda il
+// adı/ID'si yazılmaz. Satırlar scripts/seed-cities.ts ile açılır (81 il; İstanbul aktif, env ID'leri kopyalı).
+// Faz 0'da hiçbir kod yolu bu tabloyu OKUMAZ (env hâlâ kaynak). BKS-BOT bu tabloya YAZMAZ (Faz 4'te okuyacak).
+model City {
+  id       Int     @id @default(autoincrement())
+  slug     String  @unique // "istanbul" — URL segmenti (lib/cities.ts → citySlug)
+  name     String // "İstanbul"
+  plate    Int     @unique // 34
+  isActive Boolean @default(false) // kapalıysa kayıtta "Yakında", girişte kapalı
+  tbfSlug  String? // https://www.tbf.org.tr/<tbfSlug>/ligler
+
+  // Bot maç Excel kaynakları (bugün BKS-BOT src/config.ts sabitleri)
+  driveFolderId        String? // DRIVE_FOLDERS.current.id
+  driveResourceKey     String? // DRIVE_FOLDERS.current.resourceKey
+  driveArchiveFolderId String? // DRIVE_FOLDERS["yerel-ligler-arsiv"].id
+  archiveRootId        String? // ARCHIVE_ROOT_ID
+
+  // Google E-Tablo ID'leri (bugün env'de tek değer). TBF/Milli E-Tabloları bilinçli yok (açık madde A3).
+  disciplinePenaltySheetId        String? // DISCIPLINE_PENALTY_SHEET_ID
+  disciplineCoachlessSheetId      String? // DISCIPLINE_COACHLESS_SHEET_ID
+  observerReportsSheetId          String? // GOOGLE_SHEETS_OBSERVER_REPORTS_ID
+  evaluationsSheetId              String? // GOOGLE_SHEETS_EVALUATIONS_ID
+  availabilityStatsRefereeSheetId String? // GOOGLE_SHEETS_AVAILABILITY_STATS_REFEREE_ID
+  availabilityStatsGeneralSheetId String? // GOOGLE_SHEETS_AVAILABILITY_STATS_GENERAL_ID
+  paymentsSheetId                 String? // GOOGLE_SHEETS_PAYMENTS_ID
+  draftOzelSheetId                String? // DRAFT_OZEL_SHEET_ID
+  draftOkulSheetId                String? // DRAFT_OKUL_SHEET_ID
+
+  modules   Json     @default("{}") // il bazlı modül aç/kapa (Faz 3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("cities")
+}
+
 model LoginAttempt {
   id           Int       @id @default(autoincrement())
   ipAddress    String    @unique
