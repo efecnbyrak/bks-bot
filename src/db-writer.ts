@@ -35,6 +35,20 @@ export function computeMatchKey(match: MatchData): string {
 // İç boşluklar tekleştirilir (2026-10-28, web ile eşitlendi). 3x3 istisnası: aynı
 // ad/gün/saatte birden çok 3x3 maçı ayrı maçtır (farklı hakem atanıyor) — satır
 // numarası biliniyorsa anahtara eklenir, diğer maçların anahtarı değişmez.
+//
+// 2026-11-10: `kaynak_satir` artık 3x3 için FİZİKSEL Excel satır numarası değil,
+// `assignThreeXThreeOrder` (match-parser.ts) tarafından hesaplanan GRUP-İÇİ sıra
+// (aynı dosya+sekme+mac_adi+tarih+saat+salon grubundaki 0,1,2,... index). Eskiden
+// fiziksel satır numarası kullanılıyordu — federasyon sayfaya satır ekleyip
+// çıkardığında bu numara kayıyor, her kayışta aynı 3x3 maçı "yeni maç" sayılıp
+// öncekiler zincirleme sahte iptal ediliyordu, atama hiçbir zaman gerçekten
+// taşınmıyordu (14 maç/78 kişi etkilendi — bkz.
+// scripts/detect-3x3-row-shift-cancellations.ts). Grup-içi sıra, grup DIŞINDAKİ
+// bir satırın eklenip çıkarılmasından etkilenmez — sadece AYNI 3x3 grubunun kendi
+// içindeki sıra değişirse kayar (çok daha nadir). Atamalar sayfası sıralaması
+// (`lib/matches/suggestion-order.ts` → `compareExcelOrder`, web) 3x3 maçlarında bu
+// yeni (daha az isabetli ama veri kaybettirmeyen) sırayı kullanır; diğer tüm maç
+// türlerinde `kaynak_satir` hâlâ fiziksel satır numarasıdır, DEĞİŞMEDİ.
 export function contentKeyRaw(match: Pick<MatchData, "mac_adi" | "tarih" | "saat" | "kaynak_satir">): string {
     const norm = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
     const base = `${norm(match.mac_adi)}|${norm(match.tarih)}|${norm(match.saat ?? "")}`;

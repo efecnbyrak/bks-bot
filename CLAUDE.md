@@ -70,6 +70,13 @@ Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için h
 
 - **`contentKey`** = sha256(`contentKeyRaw`); `contentKeyRaw` web `lib/matches/match-utils.ts` → `contentKey` ile BİREBİR (`mac_adi|tarih|saat`,
   iç boşluk tekleştirme, 3x3'te `|#kaynak_satir`). `test/content-key-twin.test.ts` web ikiziyle aynı fixture'lar.
+- **3x3'te `kaynak_satir` artık FİZİKSEL Excel satır numarası DEĞİL** (2026-11-10). `match-parser.ts` → `assignThreeXThreeOrder`, aynı
+  dosya+sekme+mac_adi+tarih+saat+salon grubundaki satırları parse sırasına göre 0,1,2... ile numaralandırır (grup DIŞINDAKİ bir satırın
+  eklenip çıkarılmasından etkilenmez). Eskiden fiziksel satır numarası kullanılıyordu; federasyon 3x3 sayfasına satır ekleyip çıkardığında
+  bu numara kayıyor, her kayışta aynı maç "yeni maç" sayılıp öncekiler `"Kadro güncellendi"` ile zincirleme sahte iptal ediliyordu, atama
+  hiçbir zaman gerçekten taşınmıyordu (14 maç / 78 kişi etkilenmişti — tespit `scripts/detect-3x3-row-shift-cancellations.ts`, onarım
+  `scripts/repair-3x3-row-shift-cancellations.ts` + `repair-3x3-row-shift-assignments.ts`, 2026-11-10'da uygulandı). Bu, diğer tüm maç
+  türlerinde `kaynak_satir`'ı (ve web Atamalar sayfası sıralamasını, `compareExcelOrder`) DEĞİŞTİRMEZ — sadece 3x3.
 - **Karar tek satıra bakılarak verilmez** — `decideAssignmentOutcomes` (saf, `db-writer.ts`) contentKey'in **tüm aktif satırlarına** bakar.
   Kanonik satırda olan kişi maçtadır, ataması kanoniğe taşınır (`ROW_SHIFTED`), boşalan satır `"Kadro güncellendi"` ile iptal.
 - **Kanonik satır = dosyanın ŞU ANKİ hâlinde bulunan satır** (`currentFileMatchKeys`); birden çoksa en kalabalık, eşitse daha yeni (büyük id).
@@ -130,6 +137,9 @@ kanonik satıra ve diğer tablolara dokunmaz; `userId_matchId` unique çift atam
 | `backfill-contentkey-v2.ts` | contentKey formülü değişince hash'leri yeniler (`report` / `apply`, sadece `contentKey` yazar) |
 | `backfill-turkish-tarihdate.ts` | `tarihDate: NULL` satırları doldurur (sadece UPDATE) |
 | `dry-run-tbf-milli.ts` | Salt okuma — TBF-Milli sheet parse sonucu |
+| `detect-3x3-row-shift-cancellations.ts` | Salt okuma — 3x3'te fiziksel satır kayması kaynaklı zincirleme sahte iptal |
+| `repair-3x3-row-shift-cancellations.ts` | 3x3 sahte iptal onarımı adım 1/2: en dolu/en son kadrolu satırın `cancelledAt`'ini geri alır |
+| `repair-3x3-row-shift-assignments.ts` | 3x3 sahte iptal onarımı adım 2/2: `buildUserAssignments` ile aktif edilen satırların `UserMatchAssignment`'ını yazar |
 
 Yeni mükerrer deseni: önce `contentKey`'i hangi alanın değiştirdiğini bul, hedefli script yaz — **"slot bazlı hepsini birleştir"den kaçın**
 (aynı salonda peş peşe maç yöneten ekipler yanlış pozitif üretir).

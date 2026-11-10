@@ -4,3 +4,4 @@ dist/
 *.env.local
 prisma/generated/
 .undo-logs/
+backups/

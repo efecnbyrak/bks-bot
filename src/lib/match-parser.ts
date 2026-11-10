@@ -25,6 +25,20 @@ export interface MatchData {
     // Kaynak dosyadaki sekme adı ve 1 tabanlı satır numarası — web Atamalar
     // sayfası tabloyu X.HAFTA Excel'indeki sırayla göstermek için bunları kullanır.
     kaynak_sekme?: string;
+    // 1 tabanlı satır numarası — web Atamalar sayfası tabloyu X.HAFTA Excel'indeki
+    // sırayla göstermek için kullanır (`compareExcelOrder`). NORMAL maçlarda bu,
+    // Excel'deki FİZİKSEL satır numarasıdır. 3x3 maçlarında (2026-11-10'dan
+    // itibaren) bunun yerine `assignThreeXThreeOrder` tarafından hesaplanan
+    // GRUP-İÇİ sıra (aynı dosya+sekme+mac_adi+tarih+saat+salon grubunda 0,1,2,...)
+    // yazılır — fiziksel satır numarası contentKey'in bir parçası olduğunda
+    // (db-writer.ts → contentKeyRaw) federasyon sayfaya satır ekleyip çıkardıkça
+    // kayıyor, her kayışta aynı 3x3 maçı "yeni maç" sayılıp öncekiler zincirleme
+    // sahte iptal ediliyordu, atama hiçbir zaman gerçekten taşınmıyordu (14 maç/78
+    // kişi etkilendi — bkz. scripts/detect-3x3-row-shift-cancellations.ts). Grup-içi
+    // sıra, grup DIŞINDAKİ bir satırın eklenip çıkarılmasından etkilenmez — sadece
+    // AYNI 3x3 grubunun kendi içindeki sıra değişirse kayar (çok daha nadir). Bu,
+    // 3x3 maçlarının Atamalar görüntü sırasını biraz değiştirebilir ama veri
+    // kaybına yol açmaz; diğer tüm maç türlerinde davranış DEĞİŞMEDİ.
     kaynak_satir?: number;
 }
 
@@ -494,7 +508,25 @@ export function parseWorkbook(workbook: ExcelJS.Workbook, fileName: string): Mat
     if (unassignedMatchesImported > 0) {
         console.info(`[PARSER] ${fileName}: hakem/görevli ataması henüz yapılmamış ${unassignedMatchesImported} maç, boş kadroyla içeri alındı.`);
     }
+    assignThreeXThreeOrder(allMatches);
     return allMatches;
+}
+
+// 3x3 maçlarını aynı dosya+sekme+mac_adi+tarih+saat+salon grubuna göre toplayıp
+// her birinin `kaynak_satir`'ını, o PARSE TURUNDAKİ eklenme sırasına göre 0,1,2...
+// bir grup-içi index İLE DEĞİŞTİRİR (fiziksel Excel satır numarası yerine). Grubun
+// DIŞINDAKİ bir satırın eklenip çıkarılması bu sırayı etkilemez — contentKeyRaw
+// (db-writer.ts) bu değeri kullanarak zincirleme sahte iptali önler.
+function assignThreeXThreeOrder(matches: MatchData[]): void {
+    const norm = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const groupCounters = new Map<string, number>();
+    for (const m of matches) {
+        if (m.mac_adi.trim().toLowerCase() !== "3x3 - 3x3") continue;
+        const groupKey = `${m.kaynak_dosya}|${norm(m.tarih)}|${norm(m.saat)}|${norm(m.salon)}`;
+        const idx = groupCounters.get(groupKey) ?? 0;
+        groupCounters.set(groupKey, idx + 1);
+        m.kaynak_satir = idx;
+    }
 }
 
 export function getMatchesForUser(allMatches: MatchData[], firstName: string, lastName: string): UserMatchSummary {
