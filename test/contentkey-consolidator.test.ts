@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
     planConsolidation,
+    findMultiRowIds,
     ConsolidatorRow,
     ConsolidatorAssignment,
 } from "../src/lib/contentkey-consolidator";
@@ -146,5 +147,22 @@ describe("planConsolidation", () => {
             [11, []],
         ));
         assert.equal(plans[0].moves[0].action, "MOVE");
+    });
+});
+
+// Hafif ilk sorgu: sadece ikizli grupların id'leri seçilir (tam satır sadece bunlar için çekilir)
+describe("findMultiRowIds", () => {
+    test("tekil contentKey'ler elenir, 2+ satırlı grupların tüm id'leri döner", () => {
+        const ids = findMultiRowIds([
+            { id: 1, contentKey: "a" }, { id: 2, contentKey: "b" },
+            { id: 3, contentKey: "a" }, { id: 4, contentKey: "c" },
+            { id: 5, contentKey: "c" }, { id: 6, contentKey: "c" },
+        ]);
+        assert.deepEqual([...ids].sort((x, y) => x - y), [1, 3, 4, 5, 6]);
+    });
+
+    test("ikiz yoksa boş", () => {
+        assert.deepEqual(findMultiRowIds([{ id: 1, contentKey: "a" }, { id: 2, contentKey: "b" }]), []);
+        assert.deepEqual(findMultiRowIds([]), []);
     });
 });

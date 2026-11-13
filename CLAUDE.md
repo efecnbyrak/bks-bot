@@ -92,6 +92,10 @@ Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için h
   Eşik düşürülmeden önce normal günlük iade hacmine (5–24) bakılır.
 - Reconcile sadece `filesChanged` dosyalarda çalışır; donmuş dosya ikizlerini her sync sonunda `consolidateActiveContentKeyDuplicates()`
   (`contentkey-consolidator.ts`) güvenli birleştirir — bildirim üretmez, belirsiz "gerçek çıkarılma"ya dokunmaz, ilk kurulumda atlanır.
+  **Sadece o turda ParsedMatch yazıldıysa çalışır** (`didWriteParsedMatchesThisRun`, `db-writer.ts`) ve önce yalnız `id+contentKey`
+  okur, tam satırı sadece ikizli gruplar için çeker (`findMultiRowIds`). Tur ~her dakika — her turda tam tablo okumak Supabase egress
+  kotasını aştı (2026-11-13, ~0.6 MB × ~700 tur/gün). Her tur çalışan yeni bir adım **tam tablo okumaz**; ParsedMatch'e yeni yazma yolu
+  eklenirse bayrağı da set eder.
 
 ## 7. Bildirimler
 

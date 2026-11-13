@@ -168,11 +168,20 @@ export async function markDriveFileFingerprint(driveFileDbId: number, fingerprin
 
 const BATCH_SIZE = 500;
 
+// Bu süreçte (tek sync turu) ParsedMatch'e yazıldı mı? Aktif contentKey ikizi sadece bu
+// yazma yoluyla oluşabilir (iptaller satır azaltır, web taslak satırlarında contentKey null);
+// index.ts konsolidasyon taramasını yazma olmayan turlarda atlamak için okur.
+let parsedMatchesWritten = false;
+export function didWriteParsedMatchesThisRun(): boolean {
+    return parsedMatchesWritten;
+}
+
 export async function upsertParsedMatches(
     matches: MatchData[],
     driveFileDbId: number,
     sezon: string
 ): Promise<number[]> {
+    if (matches.length > 0) parsedMatchesWritten = true;
     const rows = matches.map(match => ({
         matchKey: computeMatchKey(match),
         contentKey: computeContentKey(match),

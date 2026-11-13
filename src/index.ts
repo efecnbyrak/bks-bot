@@ -2,7 +2,7 @@ import { resolveSyncFolderKeys } from "./config";
 import { runSync, RunSyncResult } from "./orchestrator";
 import { runTbfMilliSync } from "./tbf-milli-sync";
 import { reconcileAndNotify, flushDueNotifications } from "./notification-outbox";
-import { isFirstEverSync, CancelledMatchInfo, ShiftedAssignmentInfo } from "./db-writer";
+import { isFirstEverSync, didWriteParsedMatchesThisRun, CancelledMatchInfo, ShiftedAssignmentInfo } from "./db-writer";
 import { consolidateActiveContentKeyDuplicates } from "./lib/contentkey-consolidator";
 import { NewAssignmentInfo } from "./user-matcher";
 import { logger } from "./logger";
@@ -69,7 +69,10 @@ async function main() {
         // birleştirmeyi yapar (atama kullanıcıda kalır, sadece bağlı olduğu satır değişir —
         // BİLDİRİM ÜRETMEZ). Belirsiz "gerçek çıkarılma" atamalarına DOKUNMAZ. İlk kurulumda
         // atlanır (tüm veri "yeni" sayılırken çalıştırmak anlamsız).
-        if (!isInitial) {
+        // Bu turda ParsedMatch'e hiç yazılmadıysa yeni ikiz oluşamaz → tarama atlanır
+        // (tur ~her dakika; her turda tüm tabloyu okumak Supabase egress'ini aştı, 2026-11-13).
+        // Elle tarama: scripts/consolidate-active-contentkey-duplicates.ts.
+        if (!isInitial && didWriteParsedMatchesThisRun()) {
             try {
                 await consolidateActiveContentKeyDuplicates();
             } catch (consErr: any) {

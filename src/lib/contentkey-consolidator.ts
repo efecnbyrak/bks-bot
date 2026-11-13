@@ -207,25 +207,40 @@ export function planConsolidation(
 // DB OKUMA
 // ============================================================
 
+/**
+ * Aynı contentKey'den 2+ aktif satırı olan grupların satır id'leri (saf).
+ * Tam satırlar sadece bu id'ler için çekilir — tüm aktif maçların kadro sütunlarını
+ * her sync'te indirmek Supabase egress kotasını tüketiyordu (2026-11-13: ~0.6 MB × ~700 tur/gün).
+ */
+export function findMultiRowIds(keys: { id: number; contentKey: string }[]): number[] {
+    const byCk = new Map<string, number[]>();
+    for (const r of keys) {
+        const arr = byCk.get(r.contentKey) ?? [];
+        arr.push(r.id);
+        byCk.set(r.contentKey, arr);
+    }
+    return [...byCk.values()].filter(ids => ids.length >= 2).flat();
+}
+
 export async function loadConsolidationPlans(): Promise<GroupPlan[]> {
-    const rows = (await db.parsedMatch.findMany({
+    // 1) Sadece id + contentKey: ikizi olan grup var mı?
+    const keys = (await db.parsedMatch.findMany({
         where: { cancelledAt: null, contentKey: { not: null } },
+        select: { id: true, contentKey: true },
+    })) as unknown as { id: number; contentKey: string }[];
+
+    const multiRowIds = findMultiRowIds(keys);
+    if (multiRowIds.length === 0) return [];
+
+    // 2) Tam satırlar sadece ikizli gruplar için (filtre 1. sorguyla aynı)
+    const multiRows = (await db.parsedMatch.findMany({
+        where: { id: { in: multiRowIds }, cancelledAt: null, contentKey: { not: null } },
         select: {
             id: true, contentKey: true, macAdi: true, tarih: true, saat: true, salon: true, createdAt: true,
             hakemler: true, masaGorevlileri: true, saglikcilar: true,
             istatistikciler: true, gozlemciler: true, sahaKomiserleri: true,
         },
     })) as unknown as ConsolidatorRow[];
-
-    // Aynı contentKey'den >1 satırı olan grupların satır id'leri
-    const byCk = new Map<string, number[]>();
-    for (const r of rows) {
-        const arr = byCk.get(r.contentKey) ?? [];
-        arr.push(r.id);
-        byCk.set(r.contentKey, arr);
-    }
-    const multiRowIds = [...byCk.values()].filter(ids => ids.length >= 2).flat();
-    if (multiRowIds.length === 0) return [];
 
     const rawAssignments = await db.userMatchAssignment.findMany({
         where: { matchId: { in: multiRowIds } },
@@ -252,7 +267,6 @@ export async function loadConsolidationPlans(): Promise<GroupPlan[]> {
         assignmentsByRowId.set(r.matchId, arr);
     }
 
-    const multiRows = rows.filter(r => (byCk.get(r.contentKey)?.length ?? 0) >= 2);
     return planConsolidation(multiRows, assignmentsByRowId);
 }
 
