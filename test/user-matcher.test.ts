@@ -128,6 +128,8 @@ describe("buildUserAssignments DRY_RUN", () => {
         ]) as typeof db.referee.findMany);
         stubMethod(t, db.generalOfficial, "findMany", (async () => []) as typeof db.generalOfficial.findMany);
         stubMethod(t, db.userMatchAssignment, "findMany", (async () => []) as typeof db.userMatchAssignment.findMany);
+        // İptal sonrası yeniden atama kontrolü (2026-11-15) outbox'u okur — CI'da DB yok, boş döner.
+        stubMethod(t, db.matchNotificationOutbox, "findMany", (async () => []) as typeof db.matchNotificationOutbox.findMany);
         const upsertMock = mock.fn(async () => ({}));
         stubMethod(t, db.userMatchAssignment, "upsert", upsertMock as unknown as typeof db.userMatchAssignment.upsert);
         return upsertMock;
