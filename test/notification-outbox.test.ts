@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { resolvePending } from "../src/notification-outbox";
+import { resolvePending, nextRetry, RETRY_DELAYS_MIN } from "../src/notification-outbox";
 import { planWithPending, PlannedNotification } from "../src/change-notifier";
 import { MatchData } from "../src/lib/match-parser";
 import { NewAssignmentInfo } from "../src/user-matcher";
@@ -115,5 +115,21 @@ describe("planWithPending — bekleyen iptal + bu turun ataması", () => {
         );
         assert.deepEqual(r.notifications.map(n => n.kind), ["ASSIGNED"]);
         assert.deepEqual(r.consumedPendingIds, []);
+    });
+});
+
+describe("Yeniden deneme (2026-11-15)", () => {
+    const now = new Date("2026-01-01T10:00:00Z");
+    test("ASSIGNED tekrar: kişi maçtaysa gönderilir, değilse düşer", () => {
+        const n: PlannedNotification = { kind: "ASSIGNED", userId: 1, contentKey: "k", match: md() };
+        assert.equal(resolvePending({ kind: "ASSIGNED", payload: n }, { userMatch: md(), userInOldMatch: false }, now).action, "send");
+        assert.equal(resolvePending({ kind: "ASSIGNED", payload: n }, { userMatch: null, userInOldMatch: false }, now).action, "drop");
+    });
+    test("nextRetry: dizi bitene kadar PENDING, sonra FAILED", () => {
+        const r1 = nextRetry(1, now);
+        assert.equal(r1.status, "PENDING");
+        if (r1.status === "PENDING") assert.equal(r1.dueAt.getTime() - now.getTime(), RETRY_DELAYS_MIN[0] * 60_000);
+        assert.equal(nextRetry(RETRY_DELAYS_MIN.length, now).status, "PENDING");
+        assert.equal(nextRetry(RETRY_DELAYS_MIN.length + 1, now).status, "FAILED");
     });
 });

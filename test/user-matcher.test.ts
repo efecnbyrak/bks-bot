@@ -227,3 +227,13 @@ describe("buildUserAssignments isim çakışması", () => {
         ]);
     });
 });
+
+describe("resolveFuzzyCandidate — çift profil (2026-11-15)", () => {
+    test("aynı userId'nin iki profili belirsizlik sayılmaz", () => {
+        const users: UserProfile[] = [
+            { userId: 9, firstName: "GENÇOSMAN", lastName: "KOCAEREN" },
+            { userId: 9, firstName: "GENÇOSMAN", lastName: "KOCAEREN" },
+        ];
+        assert.equal(resolveFuzzyCandidate("GENÇOSMAN KOCAERENN", users)?.userId, 9);
+    });
+});

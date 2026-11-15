@@ -252,6 +252,7 @@ model UserMatchAssignment {
   @@unique([userId, matchId])
   @@index([userId])
   @@index([userId, paidAt])
+  @@index([matchId])
   @@map("user_match_assignments")
 }
 
@@ -308,12 +309,12 @@ model MatchNotificationOutbox {
   id            Int       @id @default(autoincrement())
   userId        Int
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind          String // "CANCELLED" | "UPDATED" | "CHANGED"
+  kind          String // "CANCELLED" | "UPDATED" | "CHANGED" | "ASSIGNED" (sadece FCM geçici hata yeniden denemesi)
   contentKey    String?
   oldContentKey String?
   payload       Json // bot change-notifier.ts → PlannedNotification
   dueAt         DateTime
-  status        String    @default("PENDING") // "PENDING" | "SENT" | "DROPPED"
+  status        String    @default("PENDING") // "PENDING" | "SENT" | "DROPPED" | "FAILED" (5 deneme tükendi); deneme sayısı payload._attempt
   dropReason    String?
   createdAt     DateTime  @default(now())
   sentAt        DateTime?

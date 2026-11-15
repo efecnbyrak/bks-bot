@@ -65,6 +65,47 @@ export function buildPushMessage(title: string, body: string, data: Record<strin
     };
 }
 
+// Geçici (tekrar denenince düzelebilecek) FCM hata kodları. Bu kodlarla düşen kişiye
+// bildirim "gitmedi" sayılır ve teyit kuyruğundan yeniden denenir (2026-11-15). Kalıcı
+// hatalar (ölü token, yanlış argüman, APNs kimlik hatası) tekrar denemekle düzelmez.
+const TRANSIENT_ERROR_CODES = new Set([
+    "messaging/unavailable",
+    "messaging/internal-error",
+    "messaging/server-unavailable",
+    "messaging/message-rate-exceeded",
+    "messaging/device-message-rate-exceeded",
+    "messaging/quota-exceeded",
+    "app/network-error",
+    "app/network-timeout",
+]);
+
+export interface TokenResult {
+    userId: number;
+    success: boolean;
+    code?: string;
+}
+
+// Saf: token sonuçlarından "hiçbir cihazına ulaşılamamış ve hata geçici" kişileri çıkarır.
+// Kişinin bir cihazına bile ulaştıysa teslim edilmiş sayılır (aynı bildirim çift gitmesin).
+export function classifyDelivery(results: TokenResult[]): { delivered: number[]; transientFailed: number[]; permanentFailed: number[] } {
+    const byUser = new Map<number, TokenResult[]>();
+    for (const r of results) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
+    const delivered: number[] = [];
+    const transientFailed: number[] = [];
+    const permanentFailed: number[] = [];
+    for (const [userId, rs] of byUser) {
+        if (rs.some(r => r.success)) delivered.push(userId);
+        else if (rs.some(r => !r.code || TRANSIENT_ERROR_CODES.has(r.code))) transientFailed.push(userId);
+        else permanentFailed.push(userId);
+    }
+    return { delivered, transientFailed, permanentFailed };
+}
+
+export interface PushResult {
+    // Hiçbir cihazına ulaşılamamış, geçici hatalı kişiler — çağıran tekrar dener.
+    transientFailedUserIds: number[];
+}
+
 async function sendPushToUsers(
     userIds: number[],
     title: string,
@@ -72,61 +113,75 @@ async function sendPushToUsers(
     dataType: string,
     logLabel: string,
     extraData?: Record<string, string>
-): Promise<void> {
-    if (userIds.length === 0) return;
+): Promise<PushResult> {
+    if (userIds.length === 0) return { transientFailedUserIds: [] };
 
     const app = getFirebaseApp();
-    if (!app) return;
+    // Firebase başlatılamadıysa HERKES geçici hatalı sayılır (sessizce "gönderildi" denmez).
+    if (!app) return { transientFailedUserIds: [...userIds] };
 
-    const tokenRows = await db.pushToken.findMany({
+    const tokenRows: { token: string; userId: number; platform: string }[] = await db.pushToken.findMany({
         where: { userId: { in: userIds } },
-        select: { token: true },
+        select: { token: true, userId: true, platform: true },
     });
 
-    const valid = tokenRows
-        .map((r: { token: string }) => r.token)
-        .filter((t: string) => typeof t === "string" && t.length > 0);
-    if (valid.length === 0) {
-        logger.info(`${logLabel}: push token bulunamadı`, { userIds });
-        return;
+    const valid = tokenRows.filter(r => typeof r.token === "string" && r.token.length > 0);
+    const withToken = new Set(valid.map(r => r.userId));
+    const noToken = userIds.filter(id => !withToken.has(id));
+    if (noToken.length > 0) {
+        // Uygulaması yok / bildirim izni vermemiş / çıkış yapmış kişiler — bildirim ulaşamaz.
+        logger.info(`${logLabel}: push token'ı olmayan kişiler`, { userIds: noToken });
     }
+    if (valid.length === 0) return { transientFailedUserIds: [] };
 
     // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
     // yönlendirme yapabilsin diye tüm maç bildirimlerine eklenen ortak alan.
     const data = { type: dataType, screen: "MATCHES", ...extraData };
-
     const message = buildPushMessage(title, body, data);
+
+    const results: TokenResult[] = [];
+    const deadTokens: string[] = [];
+    const errorLog: { userId: number; platform: string; code: string }[] = [];
 
     for (let i = 0; i < valid.length; i += CHUNK_SIZE) {
         const chunk = valid.slice(i, i + CHUNK_SIZE);
         try {
-            const response = await getMessaging(app).sendEachForMulticast({ tokens: chunk, ...message });
-
-            if (response.failureCount > 0) {
-                const deadTokens: string[] = [];
-                response.responses.forEach((r, idx) => {
-                    if (r.success) return;
-                    if (r.error?.code && DEAD_TOKEN_ERROR_CODES.has(r.error.code)) {
-                        deadTokens.push(chunk[idx]);
-                    }
-                });
-                logger.error("FCM gönderim hataları", { failureCount: response.failureCount });
-
-                if (deadTokens.length > 0) {
-                    await db.pushToken
-                        .deleteMany({ where: { token: { in: deadTokens } } })
-                        .catch((err: Error) => logger.error("Ölü token temizliği başarısız", { error: err.message }));
-                }
-            }
+            const response = await getMessaging(app).sendEachForMulticast({ tokens: chunk.map(c => c.token), ...message });
+            response.responses.forEach((r, idx) => {
+                const row = chunk[idx];
+                const code = r.error?.code;
+                results.push({ userId: row.userId, success: r.success, code });
+                if (r.success) return;
+                errorLog.push({ userId: row.userId, platform: row.platform, code: code ?? "unknown" });
+                if (code && DEAD_TOKEN_ERROR_CODES.has(code)) deadTokens.push(row.token);
+            });
         } catch (err: any) {
-            logger.error("Push gönderme hatası", { error: err?.message });
+            // Tüm parça düştü (ağ / kimlik) — parçadaki herkes geçici hatalı.
+            logger.error("Push gönderme hatası", { error: err?.message, code: err?.code });
+            for (const row of chunk) results.push({ userId: row.userId, success: false });
         }
     }
 
-    logger.info(`${logLabel} gönderildi`, {
-        userCount: userIds.length,
+    if (errorLog.length > 0) {
+        // Kod + platform + kişi: "kime neden gitmedi" sorusu loglardan cevaplanabilsin.
+        logger.error("FCM gönderim hataları", { failureCount: errorLog.length, errors: errorLog });
+    }
+    if (deadTokens.length > 0) {
+        await db.pushToken
+            .deleteMany({ where: { token: { in: deadTokens } } })
+            .catch((err: Error) => logger.error("Ölü token temizliği başarısız", { error: err.message }));
+    }
+
+    const { delivered, transientFailed, permanentFailed } = classifyDelivery(results);
+    const level = delivered.length === 0 && (transientFailed.length + permanentFailed.length) > 0 ? "error" : "info";
+    logger.log(level, `${logLabel} sonucu`, {
+        ulasti: delivered.length,
+        geciciHata: transientFailed.length,
+        kaliciHata: permanentFailed.length,
+        tokensiz: noToken.length,
         tokenCount: valid.length,
     });
+    return { transientFailedUserIds: transientFailed };
 }
 
 // Maç bildirimi türü → mobilin okuduğu `type` alanı. screen/channel dört türde de aynı
@@ -146,7 +201,7 @@ export async function sendMatchPush(
     kind: MatchPushKind,
     text: { title: string; body: string },
     extraData?: Record<string, string>
-): Promise<void> {
+): Promise<PushResult> {
     const { dataType, logLabel } = MATCH_PUSH_TYPES[kind];
-    await sendPushToUsers(userIds, text.title, text.body, dataType, logLabel, extraData);
+    return sendPushToUsers(userIds, text.title, text.body, dataType, logLabel, extraData);
 }

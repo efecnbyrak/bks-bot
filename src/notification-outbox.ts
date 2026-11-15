@@ -27,7 +27,21 @@ const DRY_RUN = process.env.NOTIFY_DRY_RUN === "1";
 
 export const CONFIRM_DELAY_MIN = Math.max(1, Number(process.env.NOTIFY_CONFIRM_DELAY_MIN) || 10);
 
-type QueuedKind = "CANCELLED" | "UPDATED" | "CHANGED";
+// ASSIGNED kuyruğa sadece gönderimi geçici hatayla düşerse (yeniden deneme) yazılır.
+type QueuedKind = "ASSIGNED" | "CANCELLED" | "UPDATED" | "CHANGED";
+
+// Yeniden deneme (2026-11-15): FCM geçici hatasında (ağ, FCM 5xx, kota) bildirim
+// kaybolmasın. Deneme sayısı payload'da `_attempt` olarak tutulur (şema değişmez).
+// 1., 2., ... denemeden sonra bekleme (dk); dizi bitince FAILED.
+export const RETRY_DELAYS_MIN = [1, 2, 5, 15, 30];
+
+type StoredPayload = PlannedNotification & { _attempt?: number };
+
+// Saf: başarısız gönderimden sonra satırın yeni hâli. attempt = şimdiye kadar yapılan deneme sayısı.
+export function nextRetry(attempt: number, now: Date): { status: "PENDING"; dueAt: Date } | { status: "FAILED" } {
+    if (attempt > RETRY_DELAYS_MIN.length) return { status: "FAILED" };
+    return { status: "PENDING", dueAt: new Date(now.getTime() + RETRY_DELAYS_MIN[attempt - 1] * 60_000) };
+}
 
 // Bildirim payload'ı JSON olarak saklanır; Prisma Json alanı düz obje bekliyor.
 function toPayload(n: PlannedNotification): object {
@@ -108,6 +122,13 @@ export type Resolution =
 export function resolvePending(row: PendingRow, state: CurrentState, now: Date = new Date()): Resolution {
     const n = row.payload;
 
+    // Atama yeniden denemesi: kişi hâlâ maçtaysa ve maç başlamadıysa güncel hâliyle gönder.
+    if (row.kind === "ASSIGNED") {
+        if (!state.userMatch) return { action: "drop", reason: "Kişi artık maçta değil" };
+        if (isMatchStarted(state.userMatch.tarih, state.userMatch.saat, now)) return { action: "drop", reason: "Maç başladı" };
+        return { action: "send", notification: { ...n, match: state.userMatch } };
+    }
+
     if (row.kind === "CANCELLED") {
         if (state.userMatch) return { action: "drop", reason: "Kişi maça geri yazıldı" };
         if (isMatchStarted(n.match.tarih, n.match.saat, now)) return { action: "drop", reason: "Maç başladı" };
@@ -165,17 +186,20 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
 
     const toSend: PlannedNotification[] = [];
     const sentIds: number[] = [];
+    // Gönderilen bildirim → outbox satırı (yeniden deneme için).
+    const rowOf = new Map<PlannedNotification, { id: number; attempt: number; payload: StoredPayload }>();
     const drops = new Map<string, number[]>();
 
     for (const r of due) {
         try {
-            const payload = r.payload as unknown as PlannedNotification;
+            const payload = r.payload as unknown as StoredPayload;
             const userMatch = await findUserMatch(r.userId, r.contentKey);
             const userInOldMatch = r.kind === "CHANGED" ? !!(await findUserMatch(r.userId, r.oldContentKey)) : false;
             const res = resolvePending({ kind: r.kind as QueuedKind, payload }, { userMatch, userInOldMatch }, now);
             if (res.action === "send") {
                 toSend.push(res.notification);
                 sentIds.push(r.id);
+                rowOf.set(res.notification, { id: r.id, attempt: (payload._attempt ?? 0) + 1, payload });
             } else {
                 const list = drops.get(res.reason) ?? [];
                 list.push(r.id);
@@ -187,8 +211,9 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
         }
     }
 
-    // Önce SENT işaretlenir, sonra gönderilir: gönderim yarıda kalırsa aynı bildirim bir
-    // sonraki turda İKİNCİ kez gitmesin (kaybolan tek bildirim, çift bildirimden iyidir).
+    // Önce SENT işaretlenir, sonra gönderilir: süreç gönderim ortasında ölürse aynı bildirim
+    // bir sonraki turda İKİNCİ kez gitmesin. FCM'in geçici hata DÖNDÜĞÜ kişiler ise aşağıda
+    // tekrar PENDING'e alınır (2026-11-15) — sessiz kayıp yok.
     if (sentIds.length > 0) {
         await db.matchNotificationOutbox.updateMany({
             where: { id: { in: sentIds } },
@@ -197,7 +222,27 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
     }
     for (const [reason, ids] of drops) await dropPending(ids, reason);
 
-    if (toSend.length > 0) await deliverNotifications(toSend);
+    const failed = toSend.length > 0 ? await deliverNotifications(toSend) : [];
+    let retried = 0;
+    let gaveUp = 0;
+    for (const n of failed) {
+        const row = rowOf.get(n);
+        if (!row) continue;
+        const next = nextRetry(row.attempt, new Date());
+        if (next.status === "FAILED") {
+            gaveUp++;
+            await db.matchNotificationOutbox.update({
+                where: { id: row.id },
+                data: { status: "FAILED", dropReason: `FCM ${row.attempt} denemede ulaştıramadı` },
+            });
+        } else {
+            retried++;
+            await db.matchNotificationOutbox.update({
+                where: { id: row.id },
+                data: { status: "PENDING", dueAt: next.dueAt, sentAt: null, payload: toPayload({ ...row.payload, _attempt: row.attempt } as PlannedNotification) },
+            });
+        }
+    }
 
     const count = (k: string) => toSend.filter(n => n.kind === k).length;
     logger.info("Teyit kuyruğu işlendi", {
@@ -205,6 +250,9 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
         iptal: count("CANCELLED"),
         guncellendi: count("UPDATED"),
         degisti: count("CHANGED"),
+        atamaTekrar: count("ASSIGNED"),
+        yenidenDenenecek: retried,
+        vazgecildi: gaveUp,
         dusen: Object.fromEntries([...drops].map(([k, v]) => [k, v.length])),
     });
 }
@@ -212,13 +260,16 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
 // Bildirimleri gönderir. İptallerde aynı maçtan çıkan kişiler tek push + tek
 // "Maç İadesi" duyurusunda toplanır (metin herkes için aynı). Duyuru da iptal
 // TEYİT EDİLDİKTEN sonra yazılır — sahte iptal duyurusu kalmaz.
-export async function deliverNotifications(notifications: PlannedNotification[]): Promise<void> {
-    const cancelGroups = new Map<string, { n: PlannedNotification; userIds: number[] }>();
+// Dönüş: FCM geçici hatasıyla HİÇBİR cihazına ulaşılamayan bildirimler (çağıran yeniden dener).
+export async function deliverNotifications(notifications: PlannedNotification[]): Promise<PlannedNotification[]> {
+    const failed: PlannedNotification[] = [];
+    const cancelGroups = new Map<string, { n: PlannedNotification; userIds: number[]; members: PlannedNotification[] }>();
     for (const n of notifications) {
         if (n.kind !== "CANCELLED") continue;
         const key = n.contentKey ?? `${n.match.mac_adi}|${n.match.tarih}`;
-        const g = cancelGroups.get(key) ?? { n, userIds: [] };
+        const g = cancelGroups.get(key) ?? { n, userIds: [], members: [] };
         g.userIds.push(n.userId);
+        g.members.push(n);
         cancelGroups.set(key, g);
     }
 
@@ -236,9 +287,12 @@ export async function deliverNotifications(notifications: PlannedNotification[])
         }
         for (const g of cancelGroups.values()) {
             try {
-                await sendMatchPush(g.userIds, "CANCELLED", notificationText(g.n));
+                const res = await sendMatchPush(g.userIds, "CANCELLED", notificationText(g.n));
+                const bad = new Set(res.transientFailedUserIds);
+                failed.push(...g.members.filter(m => bad.has(m.userId)));
             } catch (err: any) {
                 logger.error("İptal bildirimi gönderilemedi", { macAdi: g.n.match.mac_adi, error: err?.message });
+                failed.push(...g.members);
             }
         }
     }
@@ -249,11 +303,14 @@ export async function deliverNotifications(notifications: PlannedNotification[])
             const extra = n.kind === "CHANGED"
                 ? { oldMatchName: n.oldMatch?.mac_adi ?? "", newMatchName: n.match.mac_adi }
                 : undefined;
-            await sendMatchPush([n.userId], n.kind, notificationText(n), extra);
+            const res = await sendMatchPush([n.userId], n.kind, notificationText(n), extra);
+            if (res.transientFailedUserIds.length > 0) failed.push(n);
         } catch (err: any) {
             logger.error("Bildirim gönderilemedi", { kind: n.kind, userId: n.userId, error: err?.message });
+            failed.push(n);
         }
     }
+    return failed;
 }
 
 // Bir sync turunun olaylarını planlar: Atama anında gönderilir, gerisi teyit kuyruğuna
@@ -290,11 +347,28 @@ export async function reconcileAndNotify(
     await dropPending(consumedPendingIds, "Aynı turda yeniden atandı (birleşti / geri geldi)");
     const queuedCount = await enqueueNotifications(notifications);
     const immediate = notifications.filter(n => n.kind === "ASSIGNED");
-    if (immediate.length > 0) await deliverNotifications(immediate);
+    const failedImmediate = immediate.length > 0 ? await deliverNotifications(immediate) : [];
+    if (failedImmediate.length > 0) {
+        // Atama anında gider; FCM geçici hata verdiyse kaybolmasın — kuyruktan yeniden denenir
+        // (gönderim anında kişinin hâlâ maçta olduğu yeniden kontrol edilir).
+        const first = nextRetry(1, new Date());
+        const dueAt = first.status === "PENDING" ? first.dueAt : new Date();
+        await db.matchNotificationOutbox.createMany({
+            data: failedImmediate.map(n => ({
+                userId: n.userId,
+                kind: "ASSIGNED",
+                contentKey: n.contentKey,
+                oldContentKey: null,
+                payload: toPayload({ ...n, _attempt: 1 } as PlannedNotification),
+                dueAt,
+            })),
+        });
+    }
 
     const count = (k: NotificationKind) => notifications.filter(n => n.kind === k).length;
     logger.info("Bildirimler planlandı", {
-        yeniAtamaGonderildi: immediate.length,
+        yeniAtamaGonderildi: immediate.length - failedImmediate.length,
+        yeniAtamaTekrarKuyrugu: failedImmediate.length,
         kuyrugaYazildi: queuedCount,
         iptal: count("CANCELLED"),
         guncellendi: count("UPDATED"),

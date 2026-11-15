@@ -22,9 +22,16 @@ export function resolveFuzzyCandidate(
     person: string,
     users: UserProfile[]
 ): { userId: number; similarity: number } | null {
-    const scored = users
-        .map(u => ({ userId: u.userId, similarity: fuzzyNameSimilarity(person, u.firstName, u.lastName) }))
-        .filter(s => s.similarity >= FUZZY_THRESHOLD_DEFAULT)
+    // Çift profilli kişi (Hakem + Görevli) listede iki kez gelir; aynı userId'nin iki
+    // satırı "iki aday" sayılıp belirsiz diye atanmıyordu (2026-11-15). userId başına en
+    // yüksek skor tek aday olarak tutulur.
+    const best = new Map<number, number>();
+    for (const u of users) {
+        const sim = fuzzyNameSimilarity(person, u.firstName, u.lastName);
+        if (sim >= FUZZY_THRESHOLD_DEFAULT && sim > (best.get(u.userId) ?? -1)) best.set(u.userId, sim);
+    }
+    const scored = [...best]
+        .map(([userId, similarity]) => ({ userId, similarity }))
         .sort((a, b) => b.similarity - a.similarity);
 
     if (scored.length === 0) return null;
@@ -128,15 +135,34 @@ export async function buildUserAssignments(
     const existing = touchedContentKeys.length > 0
         ? await db.userMatchAssignment.findMany({
               where: { match: { contentKey: { in: touchedContentKeys } } },
-              select: { userId: true, match: { select: { contentKey: true } } },
+              select: { userId: true, createdAt: true, match: { select: { contentKey: true } } },
           })
         : [];
-    const existingKeys = new Set(
-        existing
-            .map((e: { userId: number; match: { contentKey: string | null } }) =>
-                e.match.contentKey ? `${e.userId}:${e.match.contentKey}` : null)
-            .filter((k): k is string => !!k)
-    );
+    // Kişi+maç için en son atama zamanı.
+    const lastAssignedAt = new Map<string, Date>();
+    for (const e of existing as { userId: number; createdAt: Date; match: { contentKey: string | null } }[]) {
+        if (!e.match.contentKey) continue;
+        const k = `${e.userId}:${e.match.contentKey}`;
+        const prev = lastAssignedAt.get(k);
+        if (!prev || e.createdAt > prev) lastAssignedAt.set(k, e.createdAt);
+    }
+    // Maçtan çıkarılıp "İptal" bildirimi GİTMİŞ, sonra aynı maça geri yazılan kişi yeniden
+    // "Atandınız" almalı (2026-11-15). İptal bildirimi son atamasından SONRA gönderildiyse
+    // eski kayıtlar "zaten biliyor" sayılmaz. Geri yazılınca yeni atama satırı oluşur,
+    // sonraki turda createdAt iptalden yeni olur → tekrar bildirim gitmez.
+    const sentCancels = touchedContentKeys.length > 0
+        ? await db.matchNotificationOutbox.findMany({
+              where: { status: "SENT", kind: "CANCELLED", contentKey: { in: touchedContentKeys } },
+              select: { userId: true, contentKey: true, sentAt: true },
+          })
+        : [];
+    for (const c of sentCancels as { userId: number; contentKey: string | null; sentAt: Date | null }[]) {
+        if (!c.contentKey || !c.sentAt) continue;
+        const k = `${c.userId}:${c.contentKey}`;
+        const last = lastAssignedAt.get(k);
+        if (last && c.sentAt > last) lastAssignedAt.delete(k);
+    }
+    const existingKeys = new Set(lastAssignedAt.keys());
 
     let assignmentCount = 0;
     let totalUnmatchedCount = 0;
@@ -253,7 +279,8 @@ export async function buildUserAssignments(
         // sorunlarını (Excel'deki yazım farklılıkları) tespit etmek için maç bazlı özet
         const unmatched = allPersonnel.filter(p => !matchedPersonnel.has(p));
         if (unmatched.length > 0) {
-            logger.debug("Personel isimleri eşleşmedi", {
+            // info: eşleşmeyen isim = o kişiye bildirim gitmez; canlıda görünür olmalı.
+            logger.info("Personel isimleri eşleşmedi", {
                 matchName: match.mac_adi,
                 unmatchedCount: unmatched.length,
                 unmatchedNames: unmatched,
