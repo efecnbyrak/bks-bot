@@ -176,6 +176,7 @@ describe("buildUserAssignments isim çakışması", () => {
         stubMethod(t, db.referee, "findMany", (async () => referees) as unknown as typeof db.referee.findMany);
         stubMethod(t, db.generalOfficial, "findMany", (async () => officials) as unknown as typeof db.generalOfficial.findMany);
         stubMethod(t, db.userMatchAssignment, "findMany", (async () => []) as typeof db.userMatchAssignment.findMany);
+        stubMethod(t, db.matchNotificationOutbox, "findMany", (async () => []) as typeof db.matchNotificationOutbox.findMany);
         const upsertMock = mock.fn(async (_args: { create: { userId: number; role: string; nameInSpreadsheet: string } }) => ({}));
         stubMethod(t, db.userMatchAssignment, "upsert", upsertMock as unknown as typeof db.userMatchAssignment.upsert);
         return () => upsertMock.mock.calls
