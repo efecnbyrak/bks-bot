@@ -104,6 +104,39 @@ export function classifyDelivery(results: TokenResult[]): { delivered: number[];
 export interface PushResult {
     // Hiçbir cihazına ulaşılamamış, geçici hatalı kişiler — çağıran tekrar dener.
     transientFailedUserIds: number[];
+    // Push'un KESİN ulaşmadığı kişiler (2026-11-15): token'ı yok, tüm cihazlarında kalıcı
+    // hata ya da telefonda bildirim izni kapalı. Çağıran e-posta yedeği yazar
+    // (lib/notification-fallback.ts). Geçici hatalılar burada YOK — onlar önce yeniden denenir.
+    undeliveredUserIds: number[];
+}
+
+// Saf: kesin ulaşmayanlar = token'sız ∪ kalıcı hatalı ∪ (ulaştı görünen ama izni kapalı).
+// Android'de izin kapalıyken FCM "başarılı" döner ama sistem bildirimi göstermez.
+export function computeUndelivered(
+    noToken: number[],
+    permanentFailed: number[],
+    delivered: number[],
+    permissionDenied: Set<number>
+): number[] {
+    const out = new Set<number>([...noToken, ...permanentFailed]);
+    for (const id of delivered) if (permissionDenied.has(id)) out.add(id);
+    return [...out];
+}
+
+// Bildirim iznini "denied" bildirmiş kişiler (web register-token yazar, bot sadece okur).
+// Okunamazsa boş küme: izin bilinmiyorsa push'a güvenilir, akış durmaz.
+async function loadPermissionDenied(userIds: number[]): Promise<Set<number>> {
+    if (userIds.length === 0) return new Set();
+    try {
+        const rows: { id: number }[] = await db.user.findMany({
+            where: { id: { in: userIds }, pushPermission: "denied" },
+            select: { id: true },
+        });
+        return new Set(rows.map(r => r.id));
+    } catch (err: any) {
+        logger.error("Bildirim izni okunamadı", { error: err?.message });
+        return new Set();
+    }
 }
 
 async function sendPushToUsers(
@@ -114,11 +147,11 @@ async function sendPushToUsers(
     logLabel: string,
     extraData?: Record<string, string>
 ): Promise<PushResult> {
-    if (userIds.length === 0) return { transientFailedUserIds: [] };
+    if (userIds.length === 0) return { transientFailedUserIds: [], undeliveredUserIds: [] };
 
     const app = getFirebaseApp();
     // Firebase başlatılamadıysa HERKES geçici hatalı sayılır (sessizce "gönderildi" denmez).
-    if (!app) return { transientFailedUserIds: [...userIds] };
+    if (!app) return { transientFailedUserIds: [...userIds], undeliveredUserIds: [] };
 
     const tokenRows: { token: string; userId: number; platform: string }[] = await db.pushToken.findMany({
         where: { userId: { in: userIds } },
@@ -132,7 +165,7 @@ async function sendPushToUsers(
         // Uygulaması yok / bildirim izni vermemiş / çıkış yapmış kişiler — bildirim ulaşamaz.
         logger.info(`${logLabel}: push token'ı olmayan kişiler`, { userIds: noToken });
     }
-    if (valid.length === 0) return { transientFailedUserIds: [] };
+    if (valid.length === 0) return { transientFailedUserIds: [], undeliveredUserIds: noToken };
 
     // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
     // yönlendirme yapabilsin diye tüm maç bildirimlerine eklenen ortak alan.
@@ -173,15 +206,18 @@ async function sendPushToUsers(
     }
 
     const { delivered, transientFailed, permanentFailed } = classifyDelivery(results);
+    const permissionDenied = await loadPermissionDenied(delivered);
+    const undelivered = computeUndelivered(noToken, permanentFailed, delivered, permissionDenied);
     const level = delivered.length === 0 && (transientFailed.length + permanentFailed.length) > 0 ? "error" : "info";
     logger.log(level, `${logLabel} sonucu`, {
         ulasti: delivered.length,
         geciciHata: transientFailed.length,
         kaliciHata: permanentFailed.length,
         tokensiz: noToken.length,
+        izinKapali: permissionDenied.size,
         tokenCount: valid.length,
     });
-    return { transientFailedUserIds: transientFailed };
+    return { transientFailedUserIds: transientFailed, undeliveredUserIds: undelivered };
 }
 
 // Maç bildirimi türü → mobilin okuduğu `type` alanı. screen/channel dört türde de aynı

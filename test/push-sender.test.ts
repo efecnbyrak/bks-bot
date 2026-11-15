@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildPushMessage, classifyDelivery } from "../src/lib/push-sender";
+import { buildPushMessage, classifyDelivery, computeUndelivered } from "../src/lib/push-sender";
+import { fallbackDedupeKey } from "../src/lib/notification-fallback";
 
 // Maç bildirimi her cihaza klasik biçimde gider (sistem gösterir — kapalı uygulamada
 // da kaybolmaz); mobil detay sayfası başlık/metni data'dan okur.
@@ -30,5 +31,31 @@ describe("classifyDelivery", () => {
         assert.deepEqual(r.delivered, [1]);
         assert.deepEqual(r.transientFailed.sort(), [2, 4]);
         assert.deepEqual(r.permanentFailed, [3]);
+    });
+});
+
+// E-posta yedeği (2026-11-15): kesin ulaşmayanlar = token'sız ∪ kalıcı hatalı ∪ izni kapalı.
+describe("computeUndelivered", () => {
+    test("token'sız ve kalıcı hatalılar dahil, ulaşanlar hariç", () => {
+        assert.deepEqual(computeUndelivered([1], [2], [3], new Set()).sort(), [1, 2]);
+    });
+    test("ulaştı görünen ama izni kapalı kişi dahil (Android izin kapalıyken FCM başarılı der)", () => {
+        assert.deepEqual(computeUndelivered([], [], [3, 4], new Set([4])), [4]);
+    });
+    test("tekrarlar tekilleşir", () => {
+        assert.deepEqual(computeUndelivered([1], [1], [], new Set()), [1]);
+    });
+});
+
+describe("fallbackDedupeKey", () => {
+    const base = { userId: 5, kind: "ASSIGNED", title: "T", body: "B", matchKey: "ck" };
+    test("aynı bildirim aynı anahtar", () => {
+        assert.equal(fallbackDedupeKey(base), fallbackDedupeKey({ ...base }));
+    });
+    test("farklı metin, kişi ya da tür farklı anahtar", () => {
+        const k = fallbackDedupeKey(base);
+        assert.notEqual(k, fallbackDedupeKey({ ...base, body: "B2" }));
+        assert.notEqual(k, fallbackDedupeKey({ ...base, userId: 6 }));
+        assert.notEqual(k, fallbackDedupeKey({ ...base, kind: "CANCELLED" }));
     });
 });

@@ -54,6 +54,10 @@ model User {
   // OKUMAZ/YAZMAZ; yalnızca şema senkronu için burada.
   kvkkConsentAt             DateTime?
   kvkkConsentVersion        String?
+  // Telefonun bildirim izni (web register-token yazar, bot SADECE okur): izni kapalı kişiye
+  // push "başarılı" görünse de e-posta yedeği yazılır. Web şemasıyla birebir.
+  pushPermission            String?
+  pushPermissionAt          DateTime?
   // bks-web-system 0.SD (soft delete) için eklendi. Bot bu alanları OKUMAZ/YAZMAZ;
   // yalnızca şema senkronu için burada. loadActiveUsers() zaten isActive:true
   // filtreliyor ve soft-delete bunu false yapıyor, bu yüzden bot davranışı
@@ -71,6 +75,7 @@ model User {
   userMatchAssignments      UserMatchAssignment[]
   pushTokens                PushToken[]
   matchNotificationOutbox   MatchNotificationOutbox[]
+  notificationFallbacks     NotificationFallback[]
   availabilityNotifications AvailabilityNotification[]
 
   @@index([username])
@@ -294,7 +299,10 @@ model PushToken {
   // BKS-BOT maç bildirimlerini 1.0.12+ Android'e sadece veri taşıyan (uygulamanın kendisi
   // büyütülebilir gösterdiği) biçimde, diğerlerine klasik biçimde gönderir (2026-10-31).
   appVersion String?
+  permission String?
   createdAt DateTime @default(now())
+  // Son kayıt/yenileme anı (upsert her açılışta günceller) — "eski token" tespiti buna bakar.
+  updatedAt  DateTime @default(now()) @updatedAt
 
   @@index([userId])
   @@map("push_tokens")
@@ -322,6 +330,27 @@ model MatchNotificationOutbox {
   @@index([status, dueAt])
   @@index([userId, contentKey])
   @@map("match_notification_outbox")
+}
+
+// Maç bildirimi e-posta yedeği (2026-11-15). Bot push'u ulaşmayan kişi için SADECE satır EKLER
+// (createMany skipDuplicates); e-postayı web cron'u `api/cron/push-fallback-email` gönderir ve
+// claimedAt/sentAt/attempts/error'u web yazar. Web şemasıyla birebir.
+model NotificationFallback {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  title     String
+  body      String
+  dedupeKey String    @unique
+  createdAt DateTime  @default(now())
+  claimedAt DateTime?
+  sentAt    DateTime?
+  attempts  Int       @default(0)
+  error     String?
+
+  @@index([sentAt, createdAt])
+  @@map("notification_fallbacks")
 }
 
 // ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────

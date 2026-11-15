@@ -115,6 +115,10 @@ Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için h
   (`buildPushMessage`). Sadece veri (data-only) biçimi 2026-11-05'te KALDIRILDI — kapalı uygulama / üretici pil kısıtlamasında
   bildirim sessizce kayboluyordu; geri getirilmez. `android.priority: high`,
   APNs `apns-priority: 10` / `apns-push-type: alert`. `messaging/invalid-argument` ölü token SAYILMAZ (web ikizi de).
+- **E-posta yedeği (2026-11-15):** `sendMatchPush` → `undeliveredUserIds` (token yok ∪ kalıcı hata ∪ `User.pushPermission = denied`,
+  `computeUndelivered`). `deliverNotifications` bunlar için, `flushDueNotifications` yeniden denemesi tükenen (`FAILED`) için
+  `lib/notification-fallback.ts` → `recordFallbacks` ile `notification_fallbacks`'e SADECE satır ekler (`dedupeKey` = tür|maç|kişi|metin özeti,
+  `skipDuplicates`). E-postayı web cron'u gönderir; bot `claimedAt/sentAt/error`'a ve `User.pushPermission`'a YAZMAZ.
 
 ## 8. Senkron ve Güvenli Çalıştırma
 
