@@ -75,7 +75,6 @@ model User {
   userMatchAssignments      UserMatchAssignment[]
   pushTokens                PushToken[]
   matchNotificationOutbox   MatchNotificationOutbox[]
-  notificationFallbacks     NotificationFallback[]
   pushDeliveries            PushDelivery[]
   availabilityNotifications AvailabilityNotification[]
 
@@ -331,26 +330,6 @@ model MatchNotificationOutbox {
   @@index([status, dueAt])
   @@index([userId, contentKey])
   @@map("match_notification_outbox")
-}
-
-// ESKİ maç bildirimi e-posta yedeği (2026-11-15). 2026-11-16'dan beri bot YAZMAZ (maç bildirimi
-// e-postayla gitmez, kullanıcı kararı); tablo web db:push ile silinene kadar şemada durur.
-model NotificationFallback {
-  id        Int       @id @default(autoincrement())
-  userId    Int
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind      String
-  title     String
-  body      String
-  dedupeKey String    @unique
-  createdAt DateTime  @default(now())
-  claimedAt DateTime?
-  sentAt    DateTime?
-  attempts  Int       @default(0)
-  error     String?
-
-  @@index([sentAt, createdAt])
-  @@map("notification_fallbacks")
 }
 
 // Push teslim kaydı (2026-11-16) — kişi başına her push denemesinin sonucu. Bot maç
