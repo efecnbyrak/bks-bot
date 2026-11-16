@@ -104,23 +104,58 @@ export function classifyDelivery(results: TokenResult[]): { delivered: number[];
 export interface PushResult {
     // Hiçbir cihazına ulaşılamamış, geçici hatalı kişiler — çağıran tekrar dener.
     transientFailedUserIds: number[];
-    // Push'un KESİN ulaşmadığı kişiler (2026-11-15): token'ı yok, tüm cihazlarında kalıcı
-    // hata ya da telefonda bildirim izni kapalı. Çağıran e-posta yedeği yazar
-    // (lib/notification-fallback.ts). Geçici hatalılar burada YOK — onlar önce yeniden denenir.
-    undeliveredUserIds: number[];
 }
 
-// Saf: kesin ulaşmayanlar = token'sız ∪ kalıcı hatalı ∪ (ulaştı görünen ama izni kapalı).
-// Android'de izin kapalıyken FCM "başarılı" döner ama sistem bildirimi göstermez.
-export function computeUndelivered(
+// Teslim kaydı durumu (push_deliveries.status, web lib/push-notifications.ts ile aynı küme).
+// "Bildirim gitti mi?" sorusu loglara değil DB'ye bakılarak cevaplansın diye (2026-11-16).
+export type DeliveryStatus = "DELIVERED" | "PERMISSION_DENIED" | "NO_TOKEN" | "TRANSIENT_FAIL" | "PERMANENT_FAIL";
+
+export interface DeliveryRow {
+    userId: number;
+    source: "BOT";
+    kind: string;
+    refKey: string | null;
+    status: DeliveryStatus;
+    tokenCount: number;
+    errorCodes: string | null;
+    attempt: number;
+}
+
+// Saf: kişi bazında teslim kaydı satırları. Kişinin bir cihazına ulaştıysa DELIVERED;
+// ulaştı ama telefonda izin kapalıysa (Android'de FCM yine "başarılı" döner) PERMISSION_DENIED.
+export function buildDeliveryRows(
     noToken: number[],
-    permanentFailed: number[],
-    delivered: number[],
-    permissionDenied: Set<number>
-): number[] {
-    const out = new Set<number>([...noToken, ...permanentFailed]);
-    for (const id of delivered) if (permissionDenied.has(id)) out.add(id);
-    return [...out];
+    results: TokenResult[],
+    permissionDenied: Set<number>,
+    ctx: { kind: string; refKey: string | null; attempt: number }
+): DeliveryRow[] {
+    const { delivered, transientFailed, permanentFailed } = classifyDelivery(results);
+    const byUser = new Map<number, TokenResult[]>();
+    for (const r of results) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
+    const row = (userId: number, status: DeliveryStatus): DeliveryRow => {
+        const rs = byUser.get(userId) ?? [];
+        const codes = [...new Set(rs.filter(r => !r.success).map(r => r.code ?? "unknown"))];
+        return {
+            userId, source: "BOT", kind: ctx.kind, refKey: ctx.refKey, status,
+            tokenCount: rs.length, errorCodes: codes.length > 0 ? codes.join(",").slice(0, 500) : null, attempt: ctx.attempt,
+        };
+    };
+    return [
+        ...noToken.map(id => row(id, "NO_TOKEN")),
+        ...delivered.map(id => row(id, permissionDenied.has(id) ? "PERMISSION_DENIED" : "DELIVERED")),
+        ...transientFailed.map(id => row(id, "TRANSIENT_FAIL")),
+        ...permanentFailed.map(id => row(id, "PERMANENT_FAIL")),
+    ];
+}
+
+// Teslim kaydını yazar. Hata bildirim akışını DURDURMAZ (push zaten gitti) ama loglanır.
+async function recordDeliveries(rows: DeliveryRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    try {
+        await db.pushDelivery.createMany({ data: rows });
+    } catch (err: any) {
+        logger.error("Teslim kaydı yazılamadı", { error: err?.message, adet: rows.length });
+    }
 }
 
 // Bildirim iznini "denied" bildirmiş kişiler (web register-token yazar, bot sadece okur).
@@ -145,13 +180,18 @@ async function sendPushToUsers(
     body: string,
     dataType: string,
     logLabel: string,
-    extraData?: Record<string, string>
+    extraData: Record<string, string> | undefined,
+    meta: { refKey: string | null; attempt: number }
 ): Promise<PushResult> {
-    if (userIds.length === 0) return { transientFailedUserIds: [], undeliveredUserIds: [] };
+    if (userIds.length === 0) return { transientFailedUserIds: [] };
+    const ctx = { kind: dataType, refKey: meta.refKey, attempt: meta.attempt };
 
     const app = getFirebaseApp();
     // Firebase başlatılamadıysa HERKES geçici hatalı sayılır (sessizce "gönderildi" denmez).
-    if (!app) return { transientFailedUserIds: [...userIds], undeliveredUserIds: [] };
+    if (!app) {
+        await recordDeliveries(buildDeliveryRows([], userIds.map(userId => ({ userId, success: false, code: "firebase-init" })), new Set(), ctx));
+        return { transientFailedUserIds: [...userIds] };
+    }
 
     const tokenRows: { token: string; userId: number; platform: string }[] = await db.pushToken.findMany({
         where: { userId: { in: userIds } },
@@ -165,7 +205,10 @@ async function sendPushToUsers(
         // Uygulaması yok / bildirim izni vermemiş / çıkış yapmış kişiler — bildirim ulaşamaz.
         logger.info(`${logLabel}: push token'ı olmayan kişiler`, { userIds: noToken });
     }
-    if (valid.length === 0) return { transientFailedUserIds: [], undeliveredUserIds: noToken };
+    if (valid.length === 0) {
+        await recordDeliveries(buildDeliveryRows(noToken, [], new Set(), ctx));
+        return { transientFailedUserIds: [] };
+    }
 
     // screen: mobil taraf type'a bakmadan tek bir kuralla ("screen" alanına göre)
     // yönlendirme yapabilsin diye tüm maç bildirimlerine eklenen ortak alan.
@@ -207,7 +250,7 @@ async function sendPushToUsers(
 
     const { delivered, transientFailed, permanentFailed } = classifyDelivery(results);
     const permissionDenied = await loadPermissionDenied(delivered);
-    const undelivered = computeUndelivered(noToken, permanentFailed, delivered, permissionDenied);
+    await recordDeliveries(buildDeliveryRows(noToken, results, permissionDenied, ctx));
     const level = delivered.length === 0 && (transientFailed.length + permanentFailed.length) > 0 ? "error" : "info";
     logger.log(level, `${logLabel} sonucu`, {
         ulasti: delivered.length,
@@ -217,7 +260,7 @@ async function sendPushToUsers(
         izinKapali: permissionDenied.size,
         tokenCount: valid.length,
     });
-    return { transientFailedUserIds: transientFailed, undeliveredUserIds: undelivered };
+    return { transientFailedUserIds: transientFailed };
 }
 
 // Maç bildirimi türü → mobilin okuduğu `type` alanı. screen/channel dört türde de aynı
@@ -236,8 +279,12 @@ export async function sendMatchPush(
     userIds: number[],
     kind: MatchPushKind,
     text: { title: string; body: string },
-    extraData?: Record<string, string>
+    extraData?: Record<string, string>,
+    meta: { refKey?: string | null; attempt?: number } = {}
 ): Promise<PushResult> {
     const { dataType, logLabel } = MATCH_PUSH_TYPES[kind];
-    return sendPushToUsers(userIds, text.title, text.body, dataType, logLabel, extraData);
+    return sendPushToUsers(userIds, text.title, text.body, dataType, logLabel, extraData, {
+        refKey: meta.refKey ?? null,
+        attempt: meta.attempt ?? 1,
+    });
 }

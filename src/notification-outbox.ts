@@ -8,7 +8,6 @@ import {
 } from "./db-writer";
 import { NewAssignmentInfo } from "./user-matcher";
 import { sendMatchPush } from "./lib/push-sender";
-import { FallbackItem, recordFallbacks } from "./lib/notification-fallback";
 import { NotificationKind, PendingCancel, PlannedNotification, notificationText, planWithPending } from "./change-notifier";
 
 // Maç bildirimi TEYİT KUYRUĞU (2026-10-31).
@@ -42,12 +41,6 @@ type StoredPayload = PlannedNotification & { _attempt?: number };
 export function nextRetry(attempt: number, now: Date): { status: "PENDING"; dueAt: Date } | { status: "FAILED" } {
     if (attempt > RETRY_DELAYS_MIN.length) return { status: "FAILED" };
     return { status: "PENDING", dueAt: new Date(now.getTime() + RETRY_DELAYS_MIN[attempt - 1] * 60_000) };
-}
-
-// Planlanan bildirim → e-posta yedeği kaydı (push ulaşmadığında; lib/notification-fallback.ts).
-export function toFallbackItem(n: PlannedNotification): FallbackItem {
-    const { title, body } = notificationText(n);
-    return { userId: n.userId, kind: n.kind, title, body, matchKey: n.contentKey ?? `${n.match.mac_adi}|${n.match.tarih}` };
 }
 
 // Bildirim payload'ı JSON olarak saklanır; Prisma Json alanı düz obje bekliyor.
@@ -229,17 +222,15 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
     }
     for (const [reason, ids] of drops) await dropPending(ids, reason);
 
-    const failed = toSend.length > 0 ? await deliverNotifications(toSend) : [];
+    const failed = toSend.length > 0 ? await deliverNotifications(toSend, n => rowOf.get(n)?.attempt ?? 1) : [];
     let retried = 0;
     let gaveUp = 0;
-    const gaveUpNotifications: PlannedNotification[] = [];
     for (const n of failed) {
         const row = rowOf.get(n);
         if (!row) continue;
         const next = nextRetry(row.attempt, new Date());
         if (next.status === "FAILED") {
             gaveUp++;
-            gaveUpNotifications.push(n);
             await db.matchNotificationOutbox.update({
                 where: { id: row.id },
                 data: { status: "FAILED", dropReason: `FCM ${row.attempt} denemede ulaştıramadı` },
@@ -253,8 +244,8 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
         }
     }
 
-    // Yeniden denemeler tükendi → push artık gitmeyecek; e-posta yedeği yazılır.
-    await recordFallbacks(gaveUpNotifications.map(toFallbackItem));
+    // Yeniden denemeler tükenince (FAILED) e-posta GÖNDERİLMEZ (kullanıcı kararı 2026-11-16:
+    // maç bildirimi sadece push). İz: outbox FAILED satırı + push_deliveries TRANSIENT_FAIL.
 
     const count = (k: string) => toSend.filter(n => n.kind === k).length;
     logger.info("Teyit kuyruğu işlendi", {
@@ -273,12 +264,14 @@ export async function flushDueNotifications(now: Date = new Date()): Promise<voi
 // "Maç İadesi" duyurusunda toplanır (metin herkes için aynı). Duyuru da iptal
 // TEYİT EDİLDİKTEN sonra yazılır — sahte iptal duyurusu kalmaz.
 // Dönüş: FCM geçici hatasıyla HİÇBİR cihazına ulaşılamayan bildirimler (çağıran yeniden dener).
-// Push'un KESİN ulaşmadığı kişiler (token yok / kalıcı hata / izin kapalı) için e-posta
-// yedeği burada yazılır (2026-11-15) — geçici hatalılar ise yeniden denemeler tükenince
-// flushDueNotifications'ta yazılır.
-export async function deliverNotifications(notifications: PlannedNotification[]): Promise<PlannedNotification[]> {
+// Her kişinin sonucu push-sender'da push_deliveries'e yazılır (teslim kaydı, 2026-11-16).
+// Maç bildirimi e-postayla GÖNDERİLMEZ (kullanıcı kararı 2026-11-16). attemptOf: yeniden
+// denemede kaçıncı deneme olduğu (teslim kaydına yazılır), verilmezse 1.
+export async function deliverNotifications(
+    notifications: PlannedNotification[],
+    attemptOf: (n: PlannedNotification) => number = () => 1
+): Promise<PlannedNotification[]> {
     const failed: PlannedNotification[] = [];
-    const undelivered: PlannedNotification[] = [];
     const cancelGroups = new Map<string, { n: PlannedNotification; userIds: number[]; members: PlannedNotification[] }>();
     for (const n of notifications) {
         if (n.kind !== "CANCELLED") continue;
@@ -303,11 +296,12 @@ export async function deliverNotifications(notifications: PlannedNotification[])
         }
         for (const g of cancelGroups.values()) {
             try {
-                const res = await sendMatchPush(g.userIds, "CANCELLED", notificationText(g.n));
+                const res = await sendMatchPush(g.userIds, "CANCELLED", notificationText(g.n), undefined, {
+                    refKey: g.n.contentKey,
+                    attempt: attemptOf(g.n),
+                });
                 const bad = new Set(res.transientFailedUserIds);
                 failed.push(...g.members.filter(m => bad.has(m.userId)));
-                const lost = new Set(res.undeliveredUserIds);
-                undelivered.push(...g.members.filter(m => lost.has(m.userId)));
             } catch (err: any) {
                 logger.error("İptal bildirimi gönderilemedi", { macAdi: g.n.match.mac_adi, error: err?.message });
                 failed.push(...g.members);
@@ -321,15 +315,16 @@ export async function deliverNotifications(notifications: PlannedNotification[])
             const extra = n.kind === "CHANGED"
                 ? { oldMatchName: n.oldMatch?.mac_adi ?? "", newMatchName: n.match.mac_adi }
                 : undefined;
-            const res = await sendMatchPush([n.userId], n.kind, notificationText(n), extra);
+            const res = await sendMatchPush([n.userId], n.kind, notificationText(n), extra, {
+                refKey: n.contentKey,
+                attempt: attemptOf(n),
+            });
             if (res.transientFailedUserIds.length > 0) failed.push(n);
-            if (res.undeliveredUserIds.includes(n.userId)) undelivered.push(n);
         } catch (err: any) {
             logger.error("Bildirim gönderilemedi", { kind: n.kind, userId: n.userId, error: err?.message });
             failed.push(n);
         }
     }
-    await recordFallbacks(undelivered.map(toFallbackItem));
     return failed;
 }
 

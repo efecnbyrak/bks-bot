@@ -76,6 +76,7 @@ model User {
   pushTokens                PushToken[]
   matchNotificationOutbox   MatchNotificationOutbox[]
   notificationFallbacks     NotificationFallback[]
+  pushDeliveries            PushDelivery[]
   availabilityNotifications AvailabilityNotification[]
 
   @@index([username])
@@ -332,9 +333,8 @@ model MatchNotificationOutbox {
   @@map("match_notification_outbox")
 }
 
-// Maç bildirimi e-posta yedeği (2026-11-15). Bot push'u ulaşmayan kişi için SADECE satır EKLER
-// (createMany skipDuplicates); e-postayı web cron'u `api/cron/push-fallback-email` gönderir ve
-// claimedAt/sentAt/attempts/error'u web yazar. Web şemasıyla birebir.
+// ESKİ maç bildirimi e-posta yedeği (2026-11-15). 2026-11-16'dan beri bot YAZMAZ (maç bildirimi
+// e-postayla gitmez, kullanıcı kararı); tablo web db:push ile silinene kadar şemada durur.
 model NotificationFallback {
   id        Int       @id @default(autoincrement())
   userId    Int
@@ -351,6 +351,27 @@ model NotificationFallback {
 
   @@index([sentAt, createdAt])
   @@map("notification_fallbacks")
+}
+
+// Push teslim kaydı (2026-11-16) — kişi başına her push denemesinin sonucu. Bot maç
+// push'larında (source "BOT"), web kendi push'larında ("WEB") SADECE satır ekler; 30 günden
+// eskiyi web cron'u (purge-old-logs) siler. Web şemasıyla birebir.
+model PushDelivery {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source     String
+  kind       String
+  refKey     String?
+  status     String
+  tokenCount Int      @default(0)
+  errorCodes String?
+  attempt    Int      @default(1)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("push_deliveries")
 }
 
 // ─── Diğer modeller (generate için gerekli — Worker dokunmaz) ──────────────

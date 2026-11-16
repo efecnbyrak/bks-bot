@@ -115,10 +115,12 @@ Federasyon kadroyu **kademeli** doldurur; `matchKey` personel içerdiği için h
   (`buildPushMessage`). Sadece veri (data-only) biçimi 2026-11-05'te KALDIRILDI — kapalı uygulama / üretici pil kısıtlamasında
   bildirim sessizce kayboluyordu; geri getirilmez. `android.priority: high`,
   APNs `apns-priority: 10` / `apns-push-type: alert`. `messaging/invalid-argument` ölü token SAYILMAZ (web ikizi de).
-- **E-posta yedeği (2026-11-15):** `sendMatchPush` → `undeliveredUserIds` (token yok ∪ kalıcı hata ∪ `User.pushPermission = denied`,
-  `computeUndelivered`). `deliverNotifications` bunlar için, `flushDueNotifications` yeniden denemesi tükenen (`FAILED`) için
-  `lib/notification-fallback.ts` → `recordFallbacks` ile `notification_fallbacks`'e SADECE satır ekler (`dedupeKey` = tür|maç|kişi|metin özeti,
-  `skipDuplicates`). E-postayı web cron'u gönderir; bot `claimedAt/sentAt/error`'a ve `User.pushPermission`'a YAZMAZ.
+- **Maç bildirimi e-postayla GİTMEZ (kullanıcı kararı 2026-11-16):** 2026-11-15'teki e-posta yedeği (`notification_fallbacks`) kaldırıldı;
+  bot o tabloya yazmaz, geri getirilmez. Yeniden denemeler tükenince satır `FAILED` kalır, başka kanal yok.
+- **Teslim kaydı (2026-11-16):** `sendMatchPush(userIds, kind, text, extra, { refKey, attempt })` kişi bazında sonucu `push_deliveries`'e
+  SADECE ekler (`buildDeliveryRows`: `DELIVERED` | `PERMISSION_DENIED` | `NO_TOKEN` | `TRANSIENT_FAIL` | `PERMANENT_FAIL`, `source: "BOT"`,
+  `refKey` = contentKey, `attempt` = outbox denemesi). Saf kurallar web `lib/notifications/push-delivery.ts` ile aynı — biri değişirse diğeri.
+  Yazma hatası akışı durdurmaz (loglanır). Silmeyi web cron'u yapar (30 gün). Bot `User.pushPermission`'a YAZMAZ, sadece okur.
 
 ## 8. Senkron ve Güvenli Çalıştırma
 

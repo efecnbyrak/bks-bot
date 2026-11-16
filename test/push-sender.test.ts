@@ -1,7 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildPushMessage, classifyDelivery, computeUndelivered } from "../src/lib/push-sender";
-import { fallbackDedupeKey } from "../src/lib/notification-fallback";
+import { buildPushMessage, buildDeliveryRows, classifyDelivery } from "../src/lib/push-sender";
 
 // Maç bildirimi her cihaza klasik biçimde gider (sistem gösterir — kapalı uygulamada
 // da kaybolmaz); mobil detay sayfası başlık/metni data'dan okur.
@@ -34,28 +33,42 @@ describe("classifyDelivery", () => {
     });
 });
 
-// E-posta yedeği (2026-11-15): kesin ulaşmayanlar = token'sız ∪ kalıcı hatalı ∪ izni kapalı.
-describe("computeUndelivered", () => {
-    test("token'sız ve kalıcı hatalılar dahil, ulaşanlar hariç", () => {
-        assert.deepEqual(computeUndelivered([1], [2], [3], new Set()).sort(), [1, 2]);
+// Teslim kaydı (2026-11-16): kişi başına tek satır, durum + token sayısı + hata kodları.
+describe("buildDeliveryRows", () => {
+    const ctx = { kind: "MATCH_ASSIGNED", refKey: "ck1", attempt: 2 };
+    test("token'sız, ulaşan, izni kapalı, geçici ve kalıcı hata ayrı durum alır", () => {
+        const rows = buildDeliveryRows(
+            [1],
+            [
+                { userId: 2, success: true },
+                { userId: 2, success: false, code: "messaging/unavailable" },
+                { userId: 3, success: true },
+                { userId: 4, success: false, code: "messaging/internal-error" },
+                { userId: 5, success: false, code: "messaging/registration-token-not-registered" },
+            ],
+            new Set([3]),
+            ctx,
+        );
+        const by = new Map(rows.map(r => [r.userId, r]));
+        assert.equal(rows.length, 5);
+        assert.equal(by.get(1)!.status, "NO_TOKEN");
+        assert.equal(by.get(1)!.tokenCount, 0);
+        assert.equal(by.get(2)!.status, "DELIVERED");
+        assert.equal(by.get(2)!.tokenCount, 2);
+        assert.equal(by.get(2)!.errorCodes, "messaging/unavailable");
+        assert.equal(by.get(3)!.status, "PERMISSION_DENIED");
+        assert.equal(by.get(4)!.status, "TRANSIENT_FAIL");
+        assert.equal(by.get(5)!.status, "PERMANENT_FAIL");
+        for (const r of rows) {
+            assert.equal(r.source, "BOT");
+            assert.equal(r.kind, "MATCH_ASSIGNED");
+            assert.equal(r.refKey, "ck1");
+            assert.equal(r.attempt, 2);
+        }
     });
-    test("ulaştı görünen ama izni kapalı kişi dahil (Android izin kapalıyken FCM başarılı der)", () => {
-        assert.deepEqual(computeUndelivered([], [], [3, 4], new Set([4])), [4]);
-    });
-    test("tekrarlar tekilleşir", () => {
-        assert.deepEqual(computeUndelivered([1], [1], [], new Set()), [1]);
-    });
-});
-
-describe("fallbackDedupeKey", () => {
-    const base = { userId: 5, kind: "ASSIGNED", title: "T", body: "B", matchKey: "ck" };
-    test("aynı bildirim aynı anahtar", () => {
-        assert.equal(fallbackDedupeKey(base), fallbackDedupeKey({ ...base }));
-    });
-    test("farklı metin, kişi ya da tür farklı anahtar", () => {
-        const k = fallbackDedupeKey(base);
-        assert.notEqual(k, fallbackDedupeKey({ ...base, body: "B2" }));
-        assert.notEqual(k, fallbackDedupeKey({ ...base, userId: 6 }));
-        assert.notEqual(k, fallbackDedupeKey({ ...base, kind: "CANCELLED" }));
+    test("hata kodu yoksa 'unknown' yazılır, başarılıda null", () => {
+        const rows = buildDeliveryRows([], [{ userId: 7, success: false }, { userId: 8, success: true }], new Set(), ctx);
+        assert.equal(rows.find(r => r.userId === 7)!.errorCodes, "unknown");
+        assert.equal(rows.find(r => r.userId === 8)!.errorCodes, null);
     });
 });
