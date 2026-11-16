@@ -189,7 +189,9 @@ async function sendPushToUsers(
     const app = getFirebaseApp();
     // Firebase başlatılamadıysa HERKES geçici hatalı sayılır (sessizce "gönderildi" denmez).
     if (!app) {
-        await recordDeliveries(buildDeliveryRows([], userIds.map(userId => ({ userId, success: false, code: "firebase-init" })), new Set(), ctx));
+        // Kayıt da dönüşle tutarlı: geçici (TRANSIENT_FAIL), kod "firebase-init" (teşhis için).
+        const rows = buildDeliveryRows([], userIds.map(userId => ({ userId, success: false, code: "firebase-init" })), new Set(), ctx);
+        await recordDeliveries(rows.map(r => ({ ...r, status: "TRANSIENT_FAIL" as const })));
         return { transientFailedUserIds: [...userIds] };
     }
 
