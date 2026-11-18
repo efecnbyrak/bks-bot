@@ -223,24 +223,32 @@ export function findMultiRowIds(keys: { id: number; contentKey: string }[]): num
 }
 
 export async function loadConsolidationPlans(): Promise<GroupPlan[]> {
-    // 1) Sadece id + contentKey: ikizi olan grup var mı?
-    const keys = (await db.parsedMatch.findMany({
+    // 1) İkizi olan contentKey'leri DB'de grupla (2026-11-18, SUPA-EGRESS): eskiden tüm aktif
+    //    satırların id + contentKey'i (~2000 satır) her yazmalı turda indiriliyordu; artık sadece
+    //    2+ aktif satırı olan anahtarlar döner (normalde hiç yok → 0 satır). Filtre aynı.
+    const dupGroups = (await db.parsedMatch.groupBy({
+        by: ["contentKey"],
         where: { cancelledAt: null, contentKey: { not: null } },
-        select: { id: true, contentKey: true },
-    })) as unknown as { id: number; contentKey: string }[];
-
-    const multiRowIds = findMultiRowIds(keys);
-    if (multiRowIds.length === 0) return [];
+        having: { contentKey: { _count: { gte: 2 } } },
+    })) as unknown as { contentKey: string | null }[];
+    const dupKeys = dupGroups.map(g => g.contentKey).filter((k): k is string => !!k);
+    if (dupKeys.length === 0) return [];
 
     // 2) Tam satırlar sadece ikizli gruplar için (filtre 1. sorguyla aynı)
-    const multiRows = (await db.parsedMatch.findMany({
-        where: { id: { in: multiRowIds }, cancelledAt: null, contentKey: { not: null } },
+    const candidateRows = (await db.parsedMatch.findMany({
+        where: { contentKey: { in: dupKeys }, cancelledAt: null },
         select: {
             id: true, contentKey: true, macAdi: true, tarih: true, saat: true, salon: true, createdAt: true,
             hakemler: true, masaGorevlileri: true, saglikcilar: true,
             istatistikciler: true, gozlemciler: true, sahaKomiserleri: true,
         },
     })) as unknown as ConsolidatorRow[];
+
+    // İki sorgu arasında bir satır iptal edilmiş olabilir — grup hâlâ 2+ satırlıysa işlenir.
+    const multiRowIds = findMultiRowIds(candidateRows);
+    if (multiRowIds.length === 0) return [];
+    const multiIdSet = new Set(multiRowIds);
+    const multiRows = candidateRows.filter(r => multiIdSet.has(r.id));
 
     const rawAssignments = await db.userMatchAssignment.findMany({
         where: { matchId: { in: multiRowIds } },
